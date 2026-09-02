@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildOpenAIConnectArgs,
+  normalizeTunnelProxyUrl,
   OpenAISecureMcpTunnel,
   parseOpenAIRuntimeStatus,
   type TunnelCommandRunner,
@@ -56,24 +57,33 @@ describe("OpenAI Secure MCP Tunnel helpers", () => {
     ).toMatchObject({ process_running: true, healthy: true, ready: true });
     expect(parseOpenAIRuntimeStatus("not json")).toEqual({});
   });
+
+  it("accepts credential-free HTTP proxies and rejects proxy credentials", () => {
+    expect(normalizeTunnelProxyUrl("http://127.0.0.1:7897")).toBe("http://127.0.0.1:7897");
+    expect(() => normalizeTunnelProxyUrl("socks5://127.0.0.1:7897")).toThrow(/http/i);
+    expect(() => normalizeTunnelProxyUrl("http://user:pass@127.0.0.1:7897")).toThrow(/credentials/i);
+  });
 });
 
 describe("OpenAI tunnel state", () => {
-  it("stores only tunnel metadata and an environment-variable reference", () => {
+  it("stores only tunnel metadata, proxy metadata, and an environment-variable reference", () => {
     stateDirs.push(isolateStateDir());
     const state = chooseOpenAITunnel({
       workspaceId: "abcdef1234567890",
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       runtimeKeyEnv: "CHATX_RUNTIME_KEY",
+      proxyUrl: "http://127.0.0.1:7897",
     });
     expect(state.preference).toBe("openai");
     expect(state.runtimeKeyEnv).toBe("CHATX_RUNTIME_KEY");
+    expect(state.openaiProxyUrl).toBe("http://127.0.0.1:7897");
     expect(JSON.stringify(state)).not.toMatch(/sk-/i);
     expect(isOpenAITunnelReady(state)).toBe(true);
     expect(openAITunnelBinding(readTunnelState("abcdef1234567890"))).toEqual({
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       alias: "chatx-abcdef123456",
       runtimeKeyEnv: "CHATX_RUNTIME_KEY",
+      proxyUrl: "http://127.0.0.1:7897",
     });
   });
 
@@ -86,11 +96,11 @@ describe("OpenAI tunnel state", () => {
 });
 
 describe("OpenAISecureMcpTunnel", () => {
-  it("connects, verifies readiness, and stops through tunnel-client runtimes", async () => {
+  it("connects asynchronously, verifies readiness, injects only the configured proxy, and stops", async () => {
     process.env.TEST_CHATX_TUNNEL_KEY = "test-only-placeholder";
-    const calls: string[][] = [];
-    const runner: TunnelCommandRunner = (args) => {
-      calls.push(args);
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const runner: TunnelCommandRunner = async (args, _timeoutMs, env) => {
+      calls.push({ args, env });
       if (args[1] === "connect") return { status: 0, stdout: JSON.stringify({ alias: "chatx-demo" }), stderr: "" };
       if (args[1] === "status") {
         return {
@@ -113,6 +123,7 @@ describe("OpenAISecureMcpTunnel", () => {
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       alias: "chatx-demo",
       runtimeKeyEnv: "TEST_CHATX_TUNNEL_KEY",
+      proxyUrl: "http://127.0.0.1:7897",
       commandRunner: runner,
     });
 
@@ -123,11 +134,41 @@ describe("OpenAISecureMcpTunnel", () => {
       url: null,
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
     });
-    expect(calls[0]).toContain("env:TEST_CHATX_TUNNEL_KEY");
-    expect(calls.flat().join(" ")).not.toContain("test-only-placeholder");
+    expect(calls[0].args).toContain("env:TEST_CHATX_TUNNEL_KEY");
+    expect(calls.flatMap((call) => call.args).join(" ")).not.toContain("test-only-placeholder");
+    expect(calls[0].env.HTTPS_PROXY).toBe("http://127.0.0.1:7897");
+    expect(calls[0].env.NO_PROXY).toContain("127.0.0.1");
 
     await provider.stop();
     expect(provider.status().running).toBe(false);
+  });
+
+  it("treats a connect command timeout as recoverable when status reports ready", async () => {
+    process.env.TEST_CHATX_TUNNEL_KEY = "test-only-placeholder";
+    const runner: TunnelCommandRunner = async (args) => {
+      if (args[1] === "connect") return { status: null, stdout: "", stderr: "", timedOut: true };
+      if (args[1] === "status") {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            tunnel_id: "tunnel_0123456789abcdef0123456789abcdef",
+            process_running: true,
+            healthy: true,
+            ready: true,
+          }),
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "{}", stderr: "" };
+    };
+    const provider = new OpenAISecureMcpTunnel({
+      tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+      alias: "chatx-demo",
+      runtimeKeyEnv: "TEST_CHATX_TUNNEL_KEY",
+      commandRunner: runner,
+    });
+    await expect(provider.start(3456)).resolves.toBeNull();
+    expect(provider.status().ready).toBe(true);
   });
 
   it("refuses to start without the runtime-key environment variable", async () => {
@@ -136,7 +177,7 @@ describe("OpenAISecureMcpTunnel", () => {
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       alias: "chatx-demo",
       runtimeKeyEnv: "TEST_CHATX_TUNNEL_KEY",
-      commandRunner: () => ({ status: 0, stdout: "{}", stderr: "" }),
+      commandRunner: async () => ({ status: 0, stdout: "{}", stderr: "" }),
     });
     await expect(provider.start(3456)).rejects.toThrow(/TEST_CHATX_TUNNEL_KEY/);
   });

@@ -102,3 +102,12 @@ Do not infer the faster transport from topology alone. When both transports can 
 The benchmark must measure the full ChatGPT -> transport -> ChatX -> ChatGPT round trip. Localhost timing or ICMP ping alone is not representative.
 
 A later benchmark-only read tool may return a nonce plus server receive/send monotonic timestamps, but it should not be added until both live transports are available for A/B testing.
+
+## Real Windows smoke findings (2026-09-02)
+
+A real Windows test against an OpenAI tunnel exposed two implementation details that are now handled by ChatX:
+
+1. `tunnel-client runtimes connect` must never be invoked with a synchronous child-process API from inside the bridge. Doing so blocks the Node event loop and prevents tunnel-client from probing the loopback MCP endpoint, creating a readiness deadlock. ChatX now uses asynchronous child processes for connect/status/stop.
+2. A Windows WinINET/browser proxy is not automatically sufficient for tunnel-client. On the tested machine, browsers used `127.0.0.1:7897` while WinHTTP and `HTTPS_PROXY` were unset, causing direct `api.openai.com:443` timeouts. ChatX therefore supports an optional per-OpenAI-transport HTTP(S) proxy that is injected only into tunnel-client, with localhost forced into `NO_PROXY`.
+
+The real smoke reached `process_running=true`, `healthy=true`, `ready=true`, resolved the remote tunnel metadata, and completed a local Streamable HTTP MCP initialize request with HTTP 200. The existing Cloudflare transport remained untouched during this test.
