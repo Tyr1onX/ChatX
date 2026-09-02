@@ -27,6 +27,7 @@ function tunnelForWorkspace(workspaceId: string, logger: Logger): TunnelProvider
       tunnelId: openai.tunnelId,
       alias: openai.alias,
       runtimeKeyEnv: openai.runtimeKeyEnv,
+      proxyUrl: openai.proxyUrl,
       logger,
     });
   }

@@ -103,6 +103,7 @@ function tunnelChoicePayload(workspace: Workspace, zoneHint?: string): Record<st
     tunnelId: state.preference === "openai" ? state.tunnelId ?? null : null,
     openaiAlias: state.openaiAlias ?? null,
     runtimeKeyEnv: state.runtimeKeyEnv ?? null,
+    openaiProxyUrl: state.openaiProxyUrl ?? null,
     zone,
     hostname: state.hostname ?? null,
     suggestedHostname: zone ? suggestedNamedHostname(zone, workspace.name, workspace.id) : null,
@@ -1052,6 +1053,7 @@ tunnelCmd
   .option("--tunnel-id <id>", "existing OpenAI Secure MCP Tunnel id")
   .option("--alias <name>", "local tunnel-client runtime alias")
   .option("--runtime-key-env <name>", "environment variable containing the runtime API key", "CONTROL_PLANE_API_KEY")
+  .option("--proxy-url <url>", "HTTP(S) proxy used only by tunnel-client")
   .option("--json", "machine-readable output", false)
   .action(async (opts: {
     mode: string;
@@ -1061,6 +1063,7 @@ tunnelCmd
     tunnelId?: string;
     alias?: string;
     runtimeKeyEnv: string;
+    proxyUrl?: string;
     json: boolean;
   }) => {
     const root = resolveWorkspace(opts.workspace);
@@ -1087,6 +1090,7 @@ tunnelCmd
           tunnelId: opts.tunnelId,
           alias: opts.alias,
           runtimeKeyEnv: opts.runtimeKeyEnv,
+          proxyUrl: opts.proxyUrl,
         });
         if (await findLiveBridge(workspace.id)) await stopBridge(root);
         const binaries = detectTunnelBinaries();

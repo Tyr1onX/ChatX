@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Logger } from "../logger/index.js";
 import { nullLogger } from "../logger/index.js";
 import { findBinary } from "./detect.js";
@@ -9,14 +9,20 @@ export interface TunnelCommandResult {
   status: number | null;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
 }
 
-export type TunnelCommandRunner = (args: string[], timeoutMs: number) => TunnelCommandResult;
+export type TunnelCommandRunner = (
+  args: string[],
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv
+) => Promise<TunnelCommandResult>;
 
 export interface OpenAISecureMcpTunnelOptions {
   tunnelId: string;
   alias: string;
   runtimeKeyEnv?: string;
+  proxyUrl?: string;
   logger?: Logger;
   binaryOverride?: string;
   startTimeoutMs?: number;
@@ -84,6 +90,37 @@ function normalizeEnvName(name: string): string {
   return normalized;
 }
 
+export function normalizeTunnelProxyUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("OpenAI tunnel proxy URL is invalid.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("OpenAI tunnel proxy must use http:// or https://.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("Proxy credentials must not be persisted in ChatX tunnel state.");
+  }
+  return parsed.origin;
+}
+
+function appendNoProxy(existing: string | undefined): string {
+  const values = new Set(
+    (existing ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+  );
+  values.add("127.0.0.1");
+  values.add("localhost");
+  values.add("::1");
+  return [...values].join(",");
+}
+
 /**
  * OpenAI Secure MCP Tunnel provider backed by the official tunnel-client.
  *
@@ -95,6 +132,7 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
   private readonly tunnel: TransportDescriptor;
   private readonly alias: string;
   private readonly runtimeKeyEnv: string;
+  private readonly proxyUrl?: string;
   private readonly logger: Logger;
   private readonly binaryOverride?: string;
   private readonly startTimeoutMs: number;
@@ -108,6 +146,7 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
     this.tunnel = openAITransport(opts.tunnelId);
     this.alias = normalizeAlias(opts.alias);
     this.runtimeKeyEnv = normalizeEnvName(opts.runtimeKeyEnv ?? "CONTROL_PLANE_API_KEY");
+    this.proxyUrl = normalizeTunnelProxyUrl(opts.proxyUrl);
     this.logger = opts.logger ?? nullLogger;
     this.binaryOverride = opts.binaryOverride;
     this.startTimeoutMs = opts.startTimeoutMs ?? 60_000;
@@ -119,28 +158,68 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
     return this.binaryOverride ?? findBinary("tunnel-client");
   }
 
-  private run(args: string[], timeoutMs = 20_000): TunnelCommandResult {
-    if (this.commandRunner) return this.commandRunner(args, timeoutMs);
-    const bin = this.binary();
-    if (!bin) throw new Error("tunnel-client binary not found");
-    const result = spawnSync(bin, args, {
-      encoding: "utf8",
-      timeout: timeoutMs,
-      windowsHide: true,
-      env: process.env,
-      maxBuffer: 1024 * 1024,
-    });
-    if (result.error) throw result.error;
-    return {
-      status: result.status,
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-    };
+  private commandEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (this.proxyUrl) {
+      env.HTTPS_PROXY = this.proxyUrl;
+      env.HTTP_PROXY = this.proxyUrl;
+      env.https_proxy = this.proxyUrl;
+      env.http_proxy = this.proxyUrl;
+      const noProxy = appendNoProxy(env.NO_PROXY ?? env.no_proxy);
+      env.NO_PROXY = noProxy;
+      env.no_proxy = noProxy;
+    }
+    return env;
   }
 
-  private readStatus(): OpenAIRuntimeStatusPayload {
-    const result = this.run(["runtimes", "status", this.alias, "--json"]);
+  private async run(args: string[], timeoutMs = 20_000): Promise<TunnelCommandResult> {
+    const env = this.commandEnv();
+    if (this.commandRunner) return this.commandRunner(args, timeoutMs, env);
+    const bin = this.binary();
+    if (!bin) throw new Error("tunnel-client binary not found");
+
+    return new Promise<TunnelCommandResult>((resolve, reject) => {
+      const child = spawn(bin, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        env,
+      });
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      const maxBytes = 1024 * 1024;
+      const collect = (current: string, chunk: Buffer): string => {
+        if (Buffer.byteLength(current, "utf8") >= maxBytes) return current;
+        const next = current + chunk.toString("utf8");
+        return Buffer.byteLength(next, "utf8") > maxBytes ? next.slice(0, maxBytes) : next;
+      };
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout = collect(stdout, chunk);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = collect(stderr, chunk);
+      });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, timeoutMs);
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        resolve({ status: code, stdout, stderr, timedOut });
+      });
+    });
+  }
+
+  private async readStatus(timeoutMs = 20_000): Promise<OpenAIRuntimeStatusPayload> {
+    const result = await this.run(["runtimes", "status", this.alias, "--json"], timeoutMs);
     const payload = parseOpenAIRuntimeStatus(result.stdout);
+    if (result.timedOut) {
+      throw new Error("tunnel-client status timed out");
+    }
     if (result.status !== 0) {
       const detail = payload.error || result.stderr.trim() || result.stdout.trim() || `exit ${result.status}`;
       throw new Error(`tunnel-client status failed: ${detail}`);
@@ -152,7 +231,7 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
     this.connected = payload.process_running === true;
     this.ready = payload.ready === true;
     this.uiUrl = typeof payload.ui_url === "string" && payload.ui_url.trim() ? payload.ui_url.trim() : null;
-    if (payload.error) this.lastError = payload.error;
+    this.lastError = payload.error?.trim() ? payload.error.trim().slice(0, 600) : null;
   }
 
   async start(localPort: number): Promise<string | null> {
@@ -166,7 +245,7 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
     }
 
     this.lastError = null;
-    const connect = this.run(
+    const connect = await this.run(
       buildOpenAIConnectArgs({
         alias: this.alias,
         tunnelId: this.tunnel.tunnelId!,
@@ -176,17 +255,22 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
       this.startTimeoutMs
     );
     const connectPayload = parseOpenAIRuntimeStatus(connect.stdout);
-    if (connect.status !== 0) {
+
+    // `runtimes connect` supervises a long-lived local runtime. Some versions
+    // may keep the management command alive until readiness settles, so a
+    // timeout is not itself fatal; status is the source of truth.
+    if (connect.status !== 0 && !connect.timedOut) {
       const detail = connectPayload.error || connect.stderr.trim() || connect.stdout.trim() || `exit ${connect.status}`;
       this.lastError = detail.slice(0, 600);
       throw new Error(`tunnel-client connect failed: ${detail}`);
     }
 
-    const status = this.readStatus();
+    const status = await this.readStatus(Math.min(this.startTimeoutMs, 30_000));
     this.applyStatus(status);
     if (!this.connected || !this.ready) {
       const state = status.runtime_state ? ` (${status.runtime_state})` : "";
-      throw new Error(`OpenAI tunnel runtime started but is not ready${state}`);
+      const detail = status.error ? `: ${status.error}` : "";
+      throw new Error(`OpenAI tunnel runtime started but is not ready${state}${detail}`);
     }
     if (status.tunnel_id && status.tunnel_id !== this.tunnel.tunnelId) {
       throw new Error("OpenAI tunnel runtime alias resolved to a different tunnel id");
@@ -202,7 +286,8 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
       this.ready = false;
       return;
     }
-    const result = this.run(["runtimes", "stop", this.alias, "--json"]);
+    const result = await this.run(["runtimes", "stop", this.alias, "--json"], 20_000);
+    if (result.timedOut) throw new Error("tunnel-client stop timed out");
     if (result.status !== 0) {
       const payload = parseOpenAIRuntimeStatus(result.stdout);
       const detail = payload.error || result.stderr.trim() || result.stdout.trim() || `exit ${result.status}`;
@@ -242,10 +327,10 @@ export class OpenAISecureMcpTunnel implements TunnelProvider {
     if (!process.env[this.runtimeKeyEnv]) problems.push(`${this.runtimeKeyEnv} is not set`);
     if (bin) {
       try {
-        const payload = this.readStatus();
+        const payload = await this.readStatus();
         this.applyStatus(payload);
         if (!this.connected) problems.push("managed tunnel runtime is not running");
-        if (this.connected && !this.ready) problems.push("managed tunnel runtime is not ready");
+        if (this.connected && !this.ready) problems.push(payload.error || "managed tunnel runtime is not ready");
       } catch (error) {
         problems.push((error as Error).message);
       }
