@@ -37,11 +37,13 @@ export function findBinary(name: string): string | null {
 export interface TunnelBinaries {
   cloudflared: string | null;
   wrangler: string | null;
+  tunnelClient: string | null;
 }
 
 export function detectTunnelBinaries(): TunnelBinaries {
   return {
     cloudflared: findBinary("cloudflared"),
     wrangler: findBinary("wrangler"),
+    tunnelClient: findBinary("tunnel-client"),
   };
 }
