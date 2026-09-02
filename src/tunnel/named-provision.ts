@@ -100,7 +100,7 @@ export class ProcessCloudflaredAccount implements CloudflaredAccount {
     if (this.hasCert()) return;
     const bin = this.binary();
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(bin, ["tunnel", "login"], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(bin, ["tunnel", "login"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       let output = "";
       const collect = (chunk: Buffer): void => {
         output += chunk.toString("utf8");
@@ -166,6 +166,7 @@ export class ProcessCloudflaredAccount implements CloudflaredAccount {
     const result = spawnSync(this.binary(), args, {
       encoding: "utf8",
       timeout: COMMAND_TIMEOUT_MS,
+      windowsHide: true,
     });
     return {
       ok: result.status === 0,

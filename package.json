@@ -23,6 +23,7 @@
     "commander": "^14.0.0",
     "express": "^5.1.0",
     "ignore": "^7.0.5",
+    "playwright-core": "1.55.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

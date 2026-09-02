@@ -37,7 +37,7 @@ beforeAll(async () => {
   });
   const tokens = bridge.authStore.issueTokens({
     clientId: "it-client",
-    scopes: ["workspace.read", "workspace.search", "git.read", "execution.read"],
+    scopes: ["workspace.read", "workspace.search", "git.read", "execution.read", "workspace.control"],
   });
   accessToken = tokens.accessToken;
 
@@ -55,23 +55,45 @@ afterAll(async () => {
 });
 
 describe("MCP tools over Streamable HTTP", () => {
-  it("lists all eight read-only tools", async () => {
+  it("lists read-only and direct-control tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
+      "browser_click",
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_type",
       "execution_summary",
       "git_diff",
       "git_status",
       "list_directory",
       "read_file",
+      "run_command",
       "search_workspace",
       "test_status",
       "workspace_info",
+      "write_file",
     ]);
-    // no write tools in V1
-    for (const forbidden of ["write_file", "delete_file", "execute_shell", "git_commit", "install_package"]) {
+    for (const forbidden of ["delete_file", "execute_shell", "git_commit", "install_package"]) {
       expect(names).not.toContain(forbidden);
     }
+  });
+
+  it("writes a workspace file and runs a local executable", async () => {
+    const written = await client.callTool({
+      name: "write_file",
+      arguments: { path: "direct-control.txt", content: "written by ChatGPT\n" },
+    });
+    expect(written.isError ?? false).toBe(false);
+    expect(jsonOf<{ path: string }>(written).path).toBe("direct-control.txt");
+
+    const command = await client.callTool({
+      name: "run_command",
+      arguments: { command: process.execPath, args: ["-e", "process.stdout.write('direct-control-ok')"] },
+    });
+    const result = jsonOf<{ exitCode: number; stdout: string }>(command);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("direct-control-ok");
   });
 
   it("workspace_info returns identity and project detection", async () => {
@@ -185,6 +207,12 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(textOf(denied)).toContain("INSUFFICIENT_SCOPE");
     const allowed = await limitedClient.callTool({ name: "read_file", arguments: { path: "hello.txt" } });
     expect(allowed.isError ?? false).toBe(false);
+    const controlDenied = await limitedClient.callTool({
+      name: "run_command",
+      arguments: { command: process.execPath, args: ["-e", "process.stdout.write('should-not-run')"] },
+    });
+    expect(controlDenied.isError).toBe(true);
+    expect(textOf(controlDenied)).toContain("INSUFFICIENT_SCOPE");
     await limitedClient.close();
   });
 

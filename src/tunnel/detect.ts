@@ -15,7 +15,7 @@ const COMMON_DIRS = [
 export function findBinary(name: string): string | null {
   const exe = process.platform === "win32" ? `${name}.exe` : name;
   try {
-    const probe = spawnSync(exe, ["--version"], { stdio: "ignore", timeout: 5000 });
+    const probe = spawnSync(exe, ["--version"], { stdio: "ignore", timeout: 5000, windowsHide: true });
     if (probe.status === 0 || probe.status === 1) return exe; // on PATH
   } catch {
     // not on PATH

@@ -82,7 +82,7 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
           "run",
           this.tunnelName,
         ],
-        { stdio: ["ignore", "pipe", "pipe"] }
+        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }
       );
       this.child = child;
       this.connected = false;

@@ -20,6 +20,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.6
+      playwright-core:
+        specifier: 1.55.0
+        version: 1.55.0
       zod:
         specifier: ^3.25.0
         version: 3.25.76
@@ -770,6 +773,11 @@ packages:
   pkce-challenge@5.0.1:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
+
+  playwright-core@1.55.0:
+    resolution: {integrity: sha512-GvZs4vU3U5ro2nZpeiwyb0zuFaqb9sUiAJuyrWpcGouD8y9/HLgGbNRjIph7zU9D3hnPaisMl9zG9CgFi/biIg==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   postcss@8.5.26:
     resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
@@ -1619,6 +1627,8 @@ snapshots:
   picomatch@4.0.7: {}
 
   pkce-challenge@5.0.1: {}
+
+  playwright-core@1.55.0: {}
 
   postcss@8.5.26:
     dependencies:
