@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import path from "node:path";
 import { startBridge, type Bridge } from "../src/bridge/server.js";
+import { filterScopes } from "../src/auth/store.js";
 import { makeTmpDir, cleanup, write, isolateStateDir, pkceVerifierAndChallenge } from "./helpers.js";
 
 let root: string;
@@ -252,6 +253,20 @@ describe("authorization + token flow", () => {
       body: JSON.stringify({ redirect_uris: ["http://evil.example.com/cb"] }),
     });
     expect(response.status).toBe(400);
+  });
+});
+
+describe("scope defaults", () => {
+  it("does not grant deprecated workspace.control by default", () => {
+    const scopes = filterScopes(undefined);
+    expect(scopes).toContain("workspace.write");
+    expect(scopes).toContain("process.run");
+    expect(scopes).toContain("browser.control");
+    expect(scopes).not.toContain("workspace.control");
+  });
+
+  it("still accepts workspace.control when a legacy client explicitly requests it", () => {
+    expect(filterScopes("workspace.read workspace.control")).toEqual(["workspace.read", "workspace.control"]);
   });
 });
 

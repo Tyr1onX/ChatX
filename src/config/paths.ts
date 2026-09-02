@@ -4,10 +4,10 @@ import fs from "node:fs";
 
 /**
  * State directory resolution, following OS conventions.
- * Override with C2C_STATE_DIR (used heavily by tests).
+ * Override with CHATX_STATE_DIR. C2C_STATE_DIR remains a compatibility alias.
  */
 export function getStateDir(): string {
-  const override = process.env.C2C_STATE_DIR;
+  const override = process.env.CHATX_STATE_DIR ?? process.env.C2C_STATE_DIR;
   if (override && override.trim() !== "") return path.resolve(override);
   const home = os.homedir();
   switch (process.platform) {

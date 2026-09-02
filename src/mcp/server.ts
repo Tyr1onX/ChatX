@@ -48,6 +48,17 @@ function requireScope(authInfo: AuthInfo | undefined, scope: string): ToolResult
   return null;
 }
 
+function requireCapabilityScope(
+  authInfo: AuthInfo | undefined,
+  scope: "workspace.write" | "process.run" | "browser.control"
+): ToolResult | null {
+  if (!authInfo) return null;
+  // workspace.control is retained only so existing paired connectors keep working
+  // through the ChatX rename. New authorizations receive the narrower scopes.
+  if (authInfo.scopes.includes(scope) || authInfo.scopes.includes("workspace.control")) return null;
+  return fail("INSUFFICIENT_SCOPE", `This operation requires the '${scope}' scope.`);
+}
+
 export interface McpContext {
   workspace: Workspace;
   logger: Logger;
@@ -101,7 +112,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     inputSchema: { url: z.string().url() },
     annotations: { readOnlyHint: false, destructiveHint: false },
   }, async (args, extra) => {
-    const denied = requireScope(extra.authInfo, "workspace.control");
+    const denied = requireCapabilityScope(extra.authInfo, "browser.control");
     if (denied) return denied;
     if (!browser) return fail("BROWSER_UNAVAILABLE", "Browser control is not configured.");
     try { return ok(await browser.navigate(args.url)); } catch (error) { return fail("BROWSER_ERROR", error instanceof Error ? error.message : String(error)); }
@@ -113,7 +124,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async (_args, extra) => {
-    const denied = requireScope(extra.authInfo, "workspace.control");
+    const denied = requireCapabilityScope(extra.authInfo, "browser.control");
     if (denied) return denied;
     if (!browser) return fail("BROWSER_UNAVAILABLE", "Browser control is not configured.");
     try { return ok(await browser.snapshot()); } catch (error) { return fail("BROWSER_ERROR", error instanceof Error ? error.message : String(error)); }
@@ -125,7 +136,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     inputSchema: { selector: z.string().min(1) },
     annotations: { readOnlyHint: false, destructiveHint: true },
   }, async (args, extra) => {
-    const denied = requireScope(extra.authInfo, "workspace.control");
+    const denied = requireCapabilityScope(extra.authInfo, "browser.control");
     if (denied) return denied;
     if (!browser) return fail("BROWSER_UNAVAILABLE", "Browser control is not configured.");
     try { return ok(await browser.click(args.selector)); } catch (error) { return fail("BROWSER_ERROR", error instanceof Error ? error.message : String(error)); }
@@ -137,7 +148,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     inputSchema: { selector: z.string().min(1), text: z.string().max(10000), press_enter: z.boolean().default(false) },
     annotations: { readOnlyHint: false, destructiveHint: true },
   }, async (args, extra) => {
-    const denied = requireScope(extra.authInfo, "workspace.control");
+    const denied = requireCapabilityScope(extra.authInfo, "browser.control");
     if (denied) return denied;
     if (!browser) return fail("BROWSER_UNAVAILABLE", "Browser control is not configured.");
     try { return ok(await browser.type(args.selector, args.text, args.press_enter)); } catch (error) { return fail("BROWSER_ERROR", error instanceof Error ? error.message : String(error)); }
@@ -159,7 +170,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async (args, extra) => {
-      const denied = requireScope(extra.authInfo, "workspace.control");
+      const denied = requireCapabilityScope(extra.authInfo, "workspace.write");
       if (denied) return denied;
       try {
         const target = workspace.resolve(args.path);
@@ -194,7 +205,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async (args, extra) => {
-      const denied = requireScope(extra.authInfo, "workspace.control");
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
       if (denied) return denied;
       try {
         const cwd = workspace.resolve(args.cwd);

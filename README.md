@@ -1,243 +1,132 @@
-# Codex with ChatGPT
+# ChatX
 
-> ChatGPT thinks. Codex works.
-> ChatGPT 负责思考，Codex 负责干活。
+**A local capability bridge for ChatGPT.** ChatX runs on your computer and exposes a bounded set of workspace, Git, process, and dedicated-browser capabilities through MCP.
 
-> [!IMPORTANT]
-> **遇到问题？** 请先向 Codex 发送 **「更新 Codex with ChatGPT」** 并重试。更新到最新版本可以解决大多数已知问题。  
-> **Having trouble?** First ask Codex to **“Update Codex with ChatGPT”** and try again. Updating to the latest version resolves most known issues.
+> **Alpha:** `v0.1.0-alpha.1` is intended for technical testers. Cloudflare transport is the production-tested path. OpenAI Secure MCP Tunnel support is implemented and locally verified, but availability of the ChatGPT-side Tunnel connection UI depends on the account/workspace.
 
-## The problem · 解决什么问题
+> **ChatGPT access:** installing ChatX does not itself enable custom MCP in ChatGPT. Connector / Developer Mode / Tunnel availability depends on the ChatGPT plan, workspace policy, and current OpenAI product rollout. Cloudflare can provide the network path, but the ChatGPT account still needs permission to add/use the connector.
 
-**中文** — ChatGPT 付费订阅的网页版额度大量闲置，Codex 却在消耗紧张的
-API 额度做规划和 Review。本项目把"思考"交给你已付费的网页版 ChatGPT，
-Codex 只负责本地运行。无需 API Key——官方网页 + OAuth MCP 桥接。
+[中文文档](README.zh-CN.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
 
-**EN** — ChatGPT Plus/Pro web quota sits idle while your coding agent burns
-scarce API/Codex tokens on planning and review. This project moves the
-thinking to the subscription you already pay for; Codex only executes.
-No API keys, no reverse proxy — official web UI plus an OAuth-protected MCP bridge.
-
-## What it is · 这是什么
-
-**中文** — 把 ChatGPT 网页版变成 Codex 编码会话的"规划与审查大脑"，执行权
-完全保留在 Codex 手里。你的仓库永远不会被上传：ChatGPT 通过一条安全的、
- OAuth 保护的 MCP 连接，按需读取或在已授权时直接操作当前工作区。
-
-**EN** — Use the ChatGPT web app as the planning, review, and (when authorized)
-local-control interface for your workspace. Your repository is never uploaded:
-ChatGPT reads exactly the lines it needs or invokes explicitly authorized local
-operations through a secure, OAuth-protected MCP connection.
-
-Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](README.zh-CN.md)**
-
-## One-paste install · 一段话安装
-
-**中文** — 不懂 git、Node、终端？完全不需要懂。把下面这段话原样复制给你的
-编码 Agent（Codex），然后去倒杯咖啡：
+## What ChatX does
 
 ```text
-请帮我完整安装并配置 Codex with ChatGPT，全程自动，我是不懂技术的小白，
-所有事情你自己做：
-
-1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
-  （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
-4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
-   ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
-   "The codex-with-chatgpt checkout lives at:" 那一行的路径改成实际克隆路径。
-5. 首次配置：按 SKILL.md 里的 first-time setup 流程执行
-  （运行 c2c setup，用内置浏览器打开 ChatGPT 配置连接器并输入配对码）。
-   全程只用内置浏览器，禁止打开任何第三方浏览器。
-6. 只有遇到需要我登录（ChatGPT / Cloudflare）、验证码或两步验证时才叫我，
-   而且一次只告诉我一个动作。
-7. 完成后给我看 ✓ 清单，并确认文件读取测试通过。我不懂 MCP、OAuth、
-   Tunnel、端口这些词，不要向我解释；出了问题先自己修。
+ChatGPT / MCP client
+        |
+        | MCP over an authenticated transport
+        v
+      ChatX                <- local Node.js process, loopback only
+  +-----+------+-----+
+  |            |     |
+Workspace     Git  Dedicated browser
+read/write         Playwright
+  |
+Process runner
+(shell:false, bounded output/timeout)
+        |
+        v
+     Your OS
 ```
 
+Current MCP capabilities include workspace inspection/search/read, Git status/diff, execution summaries, workspace file writes, local process execution, and navigation/snapshot/click/type in a dedicated Playwright browser profile.
 
-**EN** — Don't know git, Node, or terminals? You don't need to. Copy the
-paragraph below, paste it to your coding agent (Codex), and go grab a coffee:
+Direct-control capabilities are separated into OAuth scopes:
 
-```text
-Please install and configure "Codex with ChatGPT" for me, fully automatically.
-I am a non-technical user — do everything yourself:
+- `workspace.write` — write files inside the workspace boundary.
+- `process.run` — run local executables. **This is host-level code execution under your OS account and is intentionally high privilege.**
+- `browser.control` — control ChatX's dedicated browser profile.
+- `workspace.control` — legacy broad scope retained only for upgrade compatibility.
 
-1. Check the environment: git and Node.js >= 20 must be available. Install
-   anything missing yourself (macOS: Homebrew, Windows: winget). Also install
-   cloudflared.
-2. Download: clone https://github.com/XiaoDuoYa/codex-with-chatgpt into
-   ~/codex-with-chatgpt (if it already exists, git pull to update).
-3. Build: inside that folder run `corepack pnpm install` then `corepack pnpm build`.
-4. Install the Skill: copy skill/SKILL.md to
-   ~/.codex/skills/codex-with-chatgpt/SKILL.md, and update the line
-   "The codex-with-chatgpt checkout lives at:" to the actual clone path.
-5. First-time setup: follow the SKILL.md "first-time setup" workflow
-   (run c2c setup, configure the ChatGPT connector in the BUILT-IN browser,
-   enter the pairing code). Never open a third-party browser.
-6. Only interrupt me for logins (ChatGPT / Cloudflare), CAPTCHAs or 2FA —
-   and give me exactly ONE action at a time.
-7. When done, show me the ✓ checklist and confirm the file-read test passed.
-   I don't know what MCP, OAuth, tunnels or ports are. Don't explain them.
-   If anything breaks, fix it yourself first.
-```
+## Transports
 
+ChatX's core is transport-neutral:
 
-**Updates · 更新** — The Skill checks GitHub once a day and updates itself when a
-new version is released; no action needed. You can also say "更新 Codex with ChatGPT"
-anytime. / Skill 每天自动检查一次 GitHub，有新版本会自动更新，无需任何操作；
-也可以随时对 Codex 说"更新 Codex with ChatGPT"。
+- **Cloudflare Quick / Named Tunnel** — current default and end-to-end tested with ChatGPT. ChatX OAuth + one-time pairing protects the public MCP endpoint.
+- **OpenAI Secure MCP Tunnel (experimental)** — `tunnel-client` connects outbound to OpenAI and forwards to ChatX on loopback. ChatX supports the official managed runtime, Windows proxy injection, and tunnel health/readiness checks. No public ChatX URL is created.
+- **Local** — loopback-only development/testing.
 
----
+## Install from source
 
-*The sections below are in English. 以下详细内容为英文，中文完整版见
-[README.zh-CN.md](README.zh-CN.md)。*
-
-## Install → Setup → Use (manual)
-
-1. Install the Codex Skill: copy `skill/` to `~/.codex/skills/codex-with-chatgpt/`.
-2. Tell Codex: **"Set up Codex with ChatGPT."** (中文: "使用 Codex with ChatGPT 完成首次配置。")
-3. Use Codex normally: **"Use Codex with ChatGPT to implement XXX."**
-
-That's the whole manual. You don't need to know what MCP, OAuth, tunnels,
-ports or localhost are — Codex configures everything automatically and you
-just see:
-
-```
-Codex with ChatGPT
-
-✓ Project detected
-✓ Workspace Bridge started
-✓ Secure connection established
-✓ ChatGPT connected
-✓ File read test passed
-
-Ready.
-```
-
-The only steps that may need you: logging into ChatGPT (and, if you want a
-stable hostname, logging into Cloudflare once). A **new** workspace also asks
-you to create a ChatGPT Project (collection) once — pick **project-only
-memory**, name it after the workspace. If the sidebar has no Projects row,
-hover **Chats**, open the … menu, and choose **Organize by project**. Codex
-then saves that collection link and starts chats from that page. Existing
-workspaces that already have a C2C chat stay on the old one-conversation
-style until you ask to switch.
-
-### Optional stable hostname
-
-The default public address is a temporary Cloudflare URL. It changes when the
-bridge restarts, and Codex repairs ChatGPT by deleting that workspace's
-connector and adding it again.
-
-If you have a Cloudflare account and a domain already on Cloudflare, first-time
-setup (and the next coding session, once) will ask whether you want a stable
-hostname such as `c2c-<project>.your-domain.com`. That path opens a browser so
-you can authorize Cloudflare. After that, the ChatGPT connector keeps working
-across restarts. If you skip it, or login fails, Codex stays on the temporary
-address — same features, just a slower repair.
-
-Credentials stay in the OS app state directory, not in the project.
-
-## How it works
-
-```
-             ┌───────────────────────────┐
-             │       ChatGPT Web         │
-             │  Reason / Plan / Review   │
-             └──────────┬──────────▲─────┘
-                        │          │
-               MCP      │          │ Computer Use
-            Data Plane  │          │ Control Plane (<1 KB messages)
-                        ▼          │
-             ┌─────────────────────┐
-             │      C2C Bridge     │   loopback-only HTTP server
-             │  read-only MCP      │   OAuth 2.1 + one-time pairing code
-             │  OAuth + Pairing    │   Cloudflare Quick Tunnel
-             │  Tunnel Manager     │
-             └──────────┬──────────┘
-                        │  read-only
-                        ▼
-             ┌─────────────────────┐          ┌─────────────────────┐
-             │   Local Workspace   │◀─────────│    Codex Harness    │
-             └─────────────────────┘ edit/git │ shell / tests / fix │
-                                              └─────────────────────┘
-```
-
-- **Control plane (Computer Use)**: Codex and ChatGPT exchange tiny structured
-  `[C2C]` state messages — `INIT → PLAN → EXECUTED → REVIEW → DONE`. No diffs,
-  no logs, no file bodies are ever pasted.
-- **Data plane (MCP)**: ChatGPT pulls what it needs through the read-only tools
-  and, when the `workspace.control` scope is authorized, can use `write_file`
-  and `run_command` for direct local operations.
-- **Independent review**: after Codex executes, ChatGPT inspects the actual
-  git diff and test records through MCP — it never trusts "all tests passed"
-  claims blindly.
-
-## Security model (short version)
-
-- **Scoped control**: direct operations require the separate
-  `workspace.control` OAuth scope; path containment and sensitive-file rules
-  still apply, and command output is capped and time-limited.
-- **One workspace = one boundary**: every token is bound to a single workspace;
-  path containment uses canonical realpaths (symlink/`../`/absolute-path escapes
-  are all blocked and tested).
-- **Sensitive files never leave**: `.env*`, keys, SSH, credentials are denied by
-  default (`.env.example` allowed); `.c2cignore` adds your own rules.
-- **Knowing the URL grants nothing**: the public MCP endpoint requires OAuth 2.1
-  (PKCE S256, dynamic client registration, rotating refresh tokens). Without a
-  token: 401. Wrong workspace: 403.
-- **The model never sees long-lived credentials**: the only secret that ever
-  touches a browser is a one-time pairing code (5-minute TTL, 5 attempts,
-  rate-limited, destroyed on use).
-
-Full threat model: [docs/security.md](docs/security.md)
-
-## For developers
+Requirements: Node.js 20+, Git. Cloudflare mode also needs `cloudflared`.
 
 ```bash
-pnpm install
-pnpm build          # -> dist/, exposes the `c2c` bin
-pnpm test           # vitest: 76 tests (path security, OAuth, pairing, MCP e2e)
-
-c2c setup           # bridge + tunnel + pairing code, all in one
-c2c sandbox-allow   # whitelist the settings dir in Codex (macOS + Windows)
-c2c status / doctor / pair / unpair / logs / stop
+git clone https://github.com/Tyr1onX/ChatX.git
+cd ChatX
+corepack pnpm install
+corepack pnpm build
+node bin/c2c.js --version
 ```
 
-Requirements: Node.js >= 20, git. `cloudflared` for the public connection
-(auto-detected; the Skill installs it for you).
+The primary CLI name is `chatx`. `c2c` is retained as a compatibility alias. When installed from the packaged release artifact, both names are created automatically.
 
-Docs: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·
-[security](docs/security.md) · [troubleshooting](docs/troubleshooting.md)
+For a local checkout you can link it globally:
 
-## Project layout
-
-```
-src/
-  bridge/     loopback HTTP server, port recovery, admin API
-  mcp/        8 read-only tools, stateless Streamable HTTP
-  auth/       OAuth 2.1 (PKCE, DCR, refresh rotation, revocation)
-  pairing/    one-time pairing codes (CSPRNG, TTL, rate limits)
-  workspace/  path containment, sensitive-file policy, search, git
-  tunnel/     TunnelProvider abstraction + Cloudflare Quick/Named Tunnel
-  execution/  execution records for the review loop
-  process/    daemon lifecycle
-  cli/        the c2c CLI
-skill/        the Codex Skill (the real UX layer)
-tests/        unit + integration tests
-docs/         architecture / protocol / security / troubleshooting
+```bash
+npm link
+chatx --version
 ```
 
-## Status & disclaimer
+Then, for a workspace:
 
-V1. Verified end-to-end: bridge, OAuth + pairing, public tunnel, ChatGPT
-connector setup, zero-touch first-run experience.
+```bash
+chatx setup -w /path/to/project
+chatx status -w /path/to/project
+chatx doctor -w /path/to/project
+```
 
-**Unofficial community project. Not affiliated with or endorsed by OpenAI.**
+The bundled Codex skill is under `skill/SKILL.md` for users who want Codex to automate setup and connection maintenance.
 
-## License
+## Release package
 
-[MIT](LICENSE)
+Every tagged alpha release is gated by tests, typecheck, build, production dependency audit, and a **clean tarball install smoke test**. The GitHub Release workflow publishes a `.tgz` plus `SHA256SUMS.txt`.
+
+The package is intentionally allow-listed: runtime `dist/`, CLI entry, docs, skill, examples, README and license are included; `src/` and `tests/` are excluded. This prevents the old failure mode where a packed install had no `dist/` and crashed looking for the development-only `tsx` dependency.
+
+## Security model
+
+ChatX is powerful by design. The security boundary is explicit rather than implied:
+
+- Bridge HTTP binds only to loopback.
+- Cloudflare/public MCP requests require OAuth; access/refresh tokens are scoped to one workspace.
+- OpenAI Tunnel mode keeps the target on loopback and relies on the tunnel's remote access policy; ChatX still enforces workspace/sensitive-file/process/browser policy locally.
+- Workspace paths are canonicalized; traversal and symlink escapes are blocked.
+- Sensitive files such as `.env`, SSH/private keys, cloud credentials and `.npmrc` are denied by default.
+- `.chatxignore` can add project-specific exclusions; `.c2cignore` remains supported.
+- `write_file` is workspace-bounded and size-limited.
+- `run_command` uses an executable + argument array with `shell:false`, output limits and timeouts, **but the executable itself can access host resources allowed to the current OS user**.
+- The dedicated browser uses a separate profile; ChatX does not automatically attach to your normal Chrome profile.
+- Long-lived keys are not committed or printed by ChatX. OpenAI tunnel runtime keys are referenced through environment variables.
+
+Read the complete threat model before enabling direct-control scopes: [docs/security.md](docs/security.md).
+
+## Compatibility
+
+This alpha deliberately preserves existing installations:
+
+- `c2c` remains a CLI alias.
+- Existing `workspace.control` tokens remain accepted for the new narrower control capabilities.
+- Existing saved connector names are not rewritten.
+- The legacy `codex-with-chatgpt` OS state directory is reused so existing OAuth tokens, tunnel metadata, sessions and logs continue to resolve.
+- New environment variables use `CHATX_*`, while existing `C2C_*` variables remain accepted.
+
+## Development
+
+```bash
+corepack pnpm test
+corepack pnpm typecheck
+corepack pnpm build
+corepack pnpm audit --prod
+corepack pnpm release:smoke
+```
+
+CI runs on Windows and Ubuntu with Node.js 20 and 22.
+
+## Project status
+
+`v0.1.0-alpha.1` focuses on making the existing working bridge safe to distribute: ChatX branding, transport abstraction, narrower capabilities, truthful security documentation, deterministic packaging, cross-platform CI, and release smoke tests.
+
+**Unofficial community project. Not affiliated with or endorsed by OpenAI or Cloudflare.**
+
+## Upstream and license
+
+ChatX evolved from [XiaoDuoYa/codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt). The original Git history and MIT license are retained. See [LICENSE](LICENSE).

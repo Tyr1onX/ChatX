@@ -1,80 +1,149 @@
-# Architecture
+# ChatX Architecture
 
+## Overview
+
+ChatX is a local capability bridge. The model/client sends structured MCP calls; a loopback-only Node.js process performs the actual local work and returns structured results.
+
+```text
+                   Remote AI client
+                  (ChatGPT / MCP)
+                         |
+                  selected transport
+                         |
+          +--------------+--------------+
+          |                             |
+ Cloudflare Quick/Named        OpenAI Secure MCP Tunnel
+ public HTTPS endpoint             tunnel-client sidecar
+ ChatX OAuth + pairing             outbound HTTPS only
+          |                             |
+          +--------------+--------------+
+                         |
+                   127.0.0.1:<port>
+                         |
+                      ChatX
+      +------------------+------------------+
+      |                  |                  |
+  Workspace/Git       Process runner     Browser controller
+  read/search/write   child_process      Playwright profile
+      |                  |                  |
+      +------------------+------------------+
+                         |
+                       Host OS
 ```
-             ┌───────────────────────────┐
-             │    ChatGPT Web / Sol      │
-             │  Reason / Plan / Review   │
-             └──────────┬──────────▲─────┘
-                        │          │
-               MCP      │          │ Computer Use
-            Data Plane  │          │ Control Plane
-                        ▼          │
-             ┌─────────────────────┐
-             │      C2C Bridge     │
-             │  MCP Server (RO)    │
-             │  OAuth AS + PRM     │
-             │  Pairing Manager    │
-             │  Tunnel Manager     │
-             │  Admin API (local)  │
-             └──────────┬──────────┘
-                        │  read-only
-                        ▼
-             ┌─────────────────────┐
-             │   Local Workspace   │
-             └──────────▲──────────┘
-                        │ edit / shell / git / test
-             ┌──────────┴──────────┐
-             │  Codex Harness      │
-             └─────────────────────┘
-```
 
-## Principles
+## Core modules
 
-- **ChatGPT thinks. Codex works.** The bridge never re-implements a coding harness.
-- **Computer Use = control plane**: tiny `[C2C]` state messages (< 1 KB).
-- **MCP = data plane**: ChatGPT pulls files/diffs/search results itself.
-- **Read-only by design**: no write/exec tools exist in V1 at all.
-- **Workspace is the security boundary**: one bridge = one workspace = one token audience.
-
-## Components (src/)
-
-| Module | Responsibility |
+| Area | Responsibility |
 | --- | --- |
-| `bridge/` | Express app assembly, loopback-only listener, port fallback, runtime state, admin API |
-| `mcp/` | McpServer with 8 read-only tools; stateless Streamable HTTP transport (fresh server per request, JSON responses) |
-| `auth/` | OAuth 2.1 authorization server: discovery metadata (RFC 8414 + Protected Resource Metadata), dynamic client registration (RFC 7591), authorization-code + PKCE (S256 only), refresh rotation, revocation (RFC 7009). Opaque tokens stored as SHA-256 hashes |
-| `pairing/` | PairingCode lifecycle: CSPRNG generation, TTL, attempt limits, IP rate limit, one-time use |
-| `workspace/` | Canonical-path containment (realpath of deepest existing ancestor), sensitive-file policy, `.c2cignore`, paginated read/list, ripgrep search with Node fallback, git status/diff with pagination |
-| `tunnel/` | `TunnelProvider` interface + Cloudflare Quick and workspace-configured Named Tunnel implementations; business logic is vendor-agnostic |
-| `execution/` | JSONL execution records written by `c2c record`, read by `execution_summary` / `test_status` |
-| `process/` | Daemon spawn/reuse, health probing, graceful shutdown |
-| `cli/` | `c2c` commands; `--json` everywhere for the Skill |
-| `config/`, `logger/` | OS-convention state dir, secret-redacting logger |
+| `src/bridge/` | Express loopback server, runtime state, admin API, transport lifecycle |
+| `src/mcp/` | MCP Streamable HTTP endpoint and tool registration |
+| `src/auth/` | Cloudflare/public-mode OAuth 2.1, PKCE, pairing, token storage |
+| `src/workspace/` | Workspace identity, path containment, sensitive-file rules, search and Git |
+| `src/tunnel/` | Vendor-neutral provider interface; Cloudflare and OpenAI implementations |
+| `src/browser/` | Dedicated Playwright browser controller |
+| `src/process/` | Background bridge lifecycle |
+| `src/execution/` | Execution summaries used for review/status workflows |
+| `src/cli/` | `chatx` CLI (`c2c` compatibility alias) |
 
-## Request lifecycles
+## Local server
 
-**MCP call**: ChatGPT → tunnel (https) → bridge `/mcp` → bearer middleware
-(401/403) → stateless StreamableHTTP transport → tool handler → workspace layer
-(path containment → ignore rules → pagination) → JSON result.
+The bridge refuses non-loopback bind addresses. Its local HTTP surface includes:
 
-**Authorization**: 401 with `WWW-Authenticate: resource_metadata=…` →
-`/.well-known/oauth-protected-resource/mcp` → AS metadata → DCR →
-`/oauth/authorize` (HTML pairing page) → pairing code verified → 302 with
-authorization code → `/oauth/token` (PKCE S256) → access + refresh tokens.
+- `/mcp` — Streamable HTTP MCP endpoint
+- `/health` — minimal health response
+- OAuth discovery/authorization/token endpoints in Cloudflare/public mode
+- `/admin/*` — loopback + random admin-token protected CLI control surface
 
-**Ports**: prefer 48765, bind 127.0.0.1 only. On conflict, `/health` identifies
-whether the occupant is a c2c bridge for the same workspace (reuse) or not
-(fall back to an ephemeral port). Configuration follows automatically via the
-runtime state file; users never see ports.
+The bridge is one-workspace-per-instance. Workspace IDs are stable hashes derived by the workspace manager and are used to separate token/state records.
 
-**Tunnel**: default is a Cloudflare Quick Tunnel (`cloudflared tunnel --url …`).
-The URL changes per start, so `c2c doctor` can restart it and tell the Skill to
-Delete + recreate that workspace's ChatGPT connector. A workspace may instead
-choose a named hostname once (`c2c tunnel choose --mode named`). The Skill asks
-before the first public URL exists; `cloudflared tunnel login` is the only extra
-user step. Tunnel name, hostname and preference live under the OS state dir
-(`tunnels/<workspaceId>.json`), never in the project. Named starts use
-`cloudflared tunnel --url … run <name>` so the public URL stays stable. If named
-provisioning fails, C2C falls back to Quick Tunnel. If a named tunnel later
-drops, doctor asks for a Cloudflare re-login (`namedRepair`) instead of
-rotating the ChatGPT connector.
+## MCP capability layers
+
+Read-oriented capabilities:
+
+```text
+workspace_info
+list_directory
+read_file
+search_workspace
+git_status
+git_diff
+test_status
+execution_summary
+```
+
+Direct-control capabilities:
+
+```text
+write_file        -> workspace.write
+run_command       -> process.run
+browser_*         -> browser.control
+```
+
+`workspace.control` remains accepted only as a compatibility alias for existing paired installations.
+
+## Process execution
+
+`run_command` invokes:
+
+```text
+child_process.spawn(executable, args, {
+  cwd: workspaceContainedPath,
+  shell: false,
+  windowsHide: true
+})
+```
+
+ChatX caps stdout/stderr and enforces a timeout. The process is not an OS sandbox: an explicitly launched executable can access resources permitted to the ChatX OS user.
+
+## Browser execution
+
+`BrowserController` uses `playwright-core` and a dedicated persistent profile. It discovers a supported Chromium browser from common OS locations, controls only that profile, and exposes text-oriented observation plus navigate/click/type actions.
+
+The controller does not automatically attach to the user's normal Chrome/Edge profile.
+
+## Transport abstraction
+
+`TunnelProvider` no longer assumes every transport yields a public URL.
+
+### Cloudflare
+
+Cloudflare Quick and Named providers return a public HTTPS base URL. ChatX uses its own OAuth server and one-time pairing flow to authorize the remote client.
+
+### OpenAI Secure MCP Tunnel
+
+The OpenAI provider returns an opaque `tunnel_id`, not a public ChatX URL. It supervises the official `tunnel-client` managed runtime using asynchronous child-process calls and verifies runtime state using `runtimes status`.
+
+Runtime API keys are referenced as `env:NAME`; ChatX does not persist the key. An optional HTTP(S) proxy may be injected into only the tunnel-client child process. This is required on systems where browser proxy settings do not apply to command-line programs.
+
+### Local
+
+Local mode uses only the loopback MCP endpoint for development/testing.
+
+## State and compatibility
+
+The external brand is ChatX, but `v0.1.0-alpha.1` intentionally preserves several legacy identifiers so existing users are not disconnected:
+
+- default OS state directory remains `codex-with-chatgpt`
+- `c2c` CLI alias remains installed
+- legacy token prefixes remain unchanged
+- existing saved connector titles are retained
+- `C2C_*` environment variables remain fallbacks for new `CHATX_*` variables
+- `.c2cignore` remains supported alongside `.chatxignore`
+
+A future stable release can migrate these identifiers only with explicit, tested state migration.
+
+## Release architecture
+
+Source development and user installation are deliberately separated:
+
+```text
+source tree
+  -> tsc build
+  -> dist/
+  -> npm pack allow-list
+  -> clean temp install
+  -> execute packaged CLI
+  -> GitHub Release .tgz + SHA256SUMS.txt
+```
+
+CI runs Windows and Ubuntu on Node 20 and 22. Tagged release creation is blocked unless the package-install smoke passes.

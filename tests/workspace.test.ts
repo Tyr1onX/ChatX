@@ -22,7 +22,9 @@ beforeAll(() => {
   write(root, "nested/.ssh/config", "Host *\n");
   write(outside, "secret.txt", "outside data\n");
   write(root, ".c2cignore", "private-notes/\n");
+  write(root, ".chatxignore", "chatx-private/\n");
   write(root, "private-notes/todo.md", "secret notes\n");
+  write(root, "chatx-private/todo.md", "new secret notes\n");
   // symlink pointing outside the workspace (needs symlink privileges, e.g.
   // absent for unprivileged Windows runners — the escape tests then skip)
   symlinksReady = true;
@@ -123,7 +125,8 @@ describe("sensitive files", () => {
     expectDenied("nested/.ssh/config");
   });
 
-  it("honors .c2cignore custom rules", () => {
+  it("honors .chatxignore and legacy .c2cignore custom rules", () => {
+    expectDenied("chatx-private/todo.md");
     expectDenied("private-notes/todo.md");
   });
 

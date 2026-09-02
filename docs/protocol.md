@@ -40,7 +40,7 @@ GOAL:
 Implement dark mode.
 
 INSTRUCTION:
-Inspect the connected workspace through Codex with ChatGPT MCP.
+Inspect the connected workspace through ChatX MCP.
 Create an implementation plan for Codex.
 ```
 
@@ -96,7 +96,7 @@ Please independently inspect the workspace and current git diff through MCP.
 ```
 
 Before sending EXECUTED, Codex records the iteration:
-`c2c record --task c2c_f81a --iteration 1 --changed-files ... --tests ... --exit-status ok`
+`chatx record --task c2c_f81a --iteration 1 --changed-files ... --tests ... --exit-status ok`
 so ChatGPT can read it via the `execution_summary` / `test_status` tools.
 
 ### DONE / BLOCKED (ChatGPT → Codex)
@@ -126,7 +126,7 @@ NEEDS:
 
 ### HANDOFF (Codex → new ChatGPT conversation)
 
-`c2c session --json` → `conversation.mode` chooses how chats are grouped.
+`chatx session --json` → `conversation.mode` chooses how chats are grouped.
 
 - **long-chat:** one long-lived C2C conversation per workspace. Codex opens a
   replacement chat only when the user asks, the old chat lags, or the chat was
@@ -182,7 +182,7 @@ Codex owns execution.
 You own high-level reasoning, planning and review.
 
 You have access to the current local workspace through the
-"Codex with ChatGPT" MCP connector.
+"ChatX" MCP connector.
 
 Rules:
 
@@ -224,7 +224,7 @@ This Project is bound only to:
 - Connector (use this one only): {{connector_name}}
 
 When you call tools, use ONLY that connector. Do not use any other
-Codex with ChatGPT connector. If workspace_info names a different
+ChatX connector. If workspace_info names a different
 workspace, stop. Do not plan. Do not use this Project's memory.
 
 Read code, git, and diffs through that connector. Never ask anyone to

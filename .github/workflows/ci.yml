@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**", "feat/**", "fix/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: corepack pnpm install --frozen-lockfile
+      - name: Test
+        run: corepack pnpm test
+      - name: Typecheck
+        run: corepack pnpm typecheck
+      - name: Build
+        run: corepack pnpm build
+      - name: Production dependency audit
+        run: corepack pnpm audit --prod
+      - name: Release package smoke
+        run: corepack pnpm release:smoke

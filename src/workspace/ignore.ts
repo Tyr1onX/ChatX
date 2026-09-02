@@ -81,13 +81,15 @@ export class IgnoreRules {
     this.sensitive = ignore().add(SENSITIVE_PATTERNS);
     this.noise = ignore().add(NOISE_PATTERNS);
     this.custom = ignore();
-    const c2cignore = path.join(workspaceRoot, ".c2cignore");
-    try {
-      if (fs.existsSync(c2cignore)) {
-        this.custom.add(fs.readFileSync(c2cignore, "utf8"));
+    for (const fileName of [".chatxignore", ".c2cignore"]) {
+      const customIgnore = path.join(workspaceRoot, fileName);
+      try {
+        if (fs.existsSync(customIgnore)) {
+          this.custom.add(fs.readFileSync(customIgnore, "utf8"));
+        }
+      } catch {
+        // unreadable custom ignore file: fall back to the remaining rules
       }
-    } catch {
-      // unreadable .c2cignore: fall back to defaults only
     }
   }
 

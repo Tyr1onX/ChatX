@@ -37,10 +37,11 @@ const RG_CANDIDATES = [
 let cachedRg: string | null | undefined;
 
 export function findRipgrep(): string | null {
-  if (process.env.C2C_DISABLE_RG === "1") return null;
+  if ((process.env.CHATX_DISABLE_RG ?? process.env.C2C_DISABLE_RG) === "1") return null;
   if (cachedRg !== undefined) return cachedRg;
-  if (process.env.C2C_RG_PATH) {
-    cachedRg = process.env.C2C_RG_PATH;
+  const rgOverride = process.env.CHATX_RG_PATH ?? process.env.C2C_RG_PATH;
+  if (rgOverride) {
+    cachedRg = rgOverride;
     return cachedRg;
   }
   for (const candidate of RG_CANDIDATES) {

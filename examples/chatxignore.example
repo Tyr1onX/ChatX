@@ -1,0 +1,6 @@
+# Additional paths that ChatX must not expose through workspace reads/search/diffs.
+# Gitignore syntax, relative to the workspace root.
+
+private-notes/
+*.local-secret
+internal/customer-data/

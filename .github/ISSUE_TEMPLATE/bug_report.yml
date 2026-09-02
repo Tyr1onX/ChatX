@@ -1,0 +1,50 @@
+name: Bug report
+description: Report an installation, bridge, transport, MCP, or browser-control problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste API keys, OAuth tokens, pairing codes, cookies, `.env` contents, or other credentials.
+  - type: input
+    id: version
+    attributes:
+      label: ChatX version
+      placeholder: v0.1.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options: [Cloudflare Quick, Cloudflare Named, OpenAI Secure MCP Tunnel, Local, Unknown]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Sanitized `chatx doctor --json` result
+      description: Remove anything you consider sensitive before posting. Never include keys or tokens.
+      render: json
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. ...
+        2. ...

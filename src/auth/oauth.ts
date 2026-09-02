@@ -75,8 +75,11 @@ function pairingPage(opts: {
     "workspace.read": "Read files in this workspace",
     "workspace.search": "Search this workspace",
     "git.read": "Read git status and diffs",
-    "execution.read": "Read Codex execution summaries",
-    "workspace.control": "Run commands and write files in this workspace",
+    "execution.read": "Read local execution summaries",
+    "workspace.write": "Write files in this workspace",
+    "process.run": "Run local processes for this workspace",
+    "browser.control": "Control the dedicated local browser",
+    "workspace.control": "Legacy broad local-control access (compatibility)",
     offline_access: "Stay connected between sessions",
   };
   const scopeList = opts.scopes

@@ -1,12 +1,42 @@
 {
-  "name": "codex-with-chatgpt",
-  "version": "0.1.0",
-  "description": "ChatGPT thinks. Codex works. Use ChatGPT as the planning brain while keeping the Codex harness.",
+  "name": "chatx-local-bridge",
+  "version": "0.1.0-alpha.1",
+  "description": "ChatX — a local capability bridge that connects ChatGPT to your workspace, processes, Git, and a dedicated browser through MCP.",
   "type": "module",
   "license": "MIT",
   "bin": {
+    "chatx": "./bin/c2c.js",
     "c2c": "./bin/c2c.js"
   },
+  "files": [
+    "bin/",
+    "dist/",
+    "docs/",
+    "examples/",
+    "skill/",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tyr1onX/ChatX.git"
+  },
+  "homepage": "https://github.com/Tyr1onX/ChatX#readme",
+  "bugs": {
+    "url": "https://github.com/Tyr1onX/ChatX/issues"
+  },
+  "keywords": [
+    "chatx",
+    "mcp",
+    "chatgpt",
+    "local-agent",
+    "computer-use",
+    "cloudflare-tunnel",
+    "openai-tunnel"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -15,9 +45,15 @@
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
+    "release:smoke": "node scripts/release-smoke.mjs",
+    "release:check": "npm run test && npm run typecheck && npm run build && npm run release:smoke"
   },
   "packageManager": "pnpm@11.24.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "commander": "^14.0.0",

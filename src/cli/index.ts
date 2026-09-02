@@ -192,8 +192,8 @@ async function ensureBridgeAndTunnel(
 }
 
 program
-  .name("c2c")
-  .description(`${PRODUCT_NAME} — ChatGPT thinks. Codex works.`)
+  .name("chatx")
+  .description(`${PRODUCT_NAME} — local capabilities for ChatGPT over MCP.`)
   .version(VERSION, "-v, --version")
   .configureHelp({ sortSubcommands: true });
 
@@ -377,7 +377,7 @@ program
     const runtime = await findLiveBridge(workspace.id);
     if (!runtime) {
       if (opts.json) say(JSON.stringify({ ok: false, running: false }));
-      else say("Bridge 未运行。使用 `c2c start` 启动。");
+      else say("Bridge 未运行。使用 `chatx start` 启动。");
       return;
     }
     const info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
@@ -495,7 +495,7 @@ program
           previousName: lastEndpoint?.connectorName,
           hadEndpointBefore: Boolean(lastEndpoint),
         })
-      : "Codex with ChatGPT";
+      : PRODUCT_NAME;
     const tunnelState = selectedTunnelState;
     const openaiReady = selectedOpenAI;
     const namedReady = tunnelState ? isNamedTunnelReady(tunnelState) : false;
@@ -724,7 +724,7 @@ program
           ? "本地已就绪，还需要在 ChatGPT 删除并重新添加该连接。"
           : namedRepair.needed
             ? "固定域名还没连上，需要先登录 Cloudflare。"
-            : "仍有问题未解决，可尝试 `c2c restart --tunnel`。"
+            : "仍有问题未解决，可尝试 `chatx restart --tunnel`。"
     );
     if (!allOk || namedRepair.needed) process.exitCode = 1;
   });

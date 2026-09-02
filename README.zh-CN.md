@@ -1,173 +1,155 @@
-# Codex with ChatGPT
+# ChatX
 
-[English](README.md) | **简体中文**
+**让 ChatGPT 安全地调用你本机能力的本地桥接器。** ChatX 运行在你的电脑上，通过 MCP 暴露受边界控制的工作区、Git、本地进程和专用浏览器能力。
 
-> ChatGPT 负责思考，Codex 负责干活。
+> **Alpha：** `v0.1.0-alpha.1` 面向技术测试用户。Cloudflare 仍是当前已经完整跑通的默认传输；OpenAI Secure MCP Tunnel 已完成实现并在 Windows 本机验证到 `healthy / ready / MCP 200`，但 ChatGPT 侧是否能创建 Tunnel 连接仍取决于账号/工作区权限。
 
-## 解决什么问题
+> **ChatGPT 权限说明：** 安装 ChatX 本身不会给 ChatGPT 账号解锁自定义 MCP。Connector / Developer Mode / Tunnel 能否使用取决于当前套餐、工作区策略和 OpenAI 产品开放情况。Cloudflare 只解决网络链路，ChatGPT 账号本身仍需具备添加/使用连接器的权限。
 
-ChatGPT 付费订阅的网页版额度大量闲置，Codex 却在消耗紧张的 API 额度做
-规划和 Review。本项目把"思考"交给你已付费的网页版 ChatGPT，Codex 只负责
-执行。不用 API Key、不搞逆向代理——官方网页 + 只读 MCP 桥接。
+[English](README.md) · [安全模型](docs/security.md) · [架构](docs/architecture.md) · [排障](docs/troubleshooting.md)
 
-## 这是什么
-
-把 ChatGPT 网页版变成 Codex 编码会话的"规划与审查大脑"，而执行权完全保留在
-Codex 手里。你的仓库永远不会被上传——ChatGPT 通过一条安全的、OAuth 保护的
-**只读** MCP 连接，按需读取当前工作区里它真正需要的那几行代码。
-
-## 一段话安装（纯小白专用）
-
-不懂 git、Node、终端？完全不需要懂。把下面这段话原样复制给你的编码
-Agent（Codex），然后去倒杯咖啡：
+## ChatX 是什么
 
 ```text
-请帮我完整安装并配置 Codex with ChatGPT，全程自动，我是不懂技术的小白，
-所有事情你自己做：
-
-1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
-  （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
-4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
-   ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
-   "The codex-with-chatgpt checkout lives at:" 那一行的路径改成实际克隆路径。
-5. 首次配置：按 SKILL.md 里的 first-time setup 流程执行
-  （运行 c2c setup，用内置浏览器打开 ChatGPT 配置连接器并输入配对码）。
-   全程只用内置浏览器，禁止打开任何第三方浏览器。
-6. 只有遇到需要我登录（ChatGPT / Cloudflare）、验证码或两步验证时才叫我，
-   而且一次只告诉我一个动作。
-7. 完成后给我看 ✓ 清单，并确认文件读取测试通过。我不懂 MCP、OAuth、
-   Tunnel、端口这些词，不要向我解释；出了问题先自己修。
+ChatGPT / MCP Client
+        |
+        | MCP + 认证传输
+        v
+      ChatX                 <- 本机 Node.js，HTTP 只监听 loopback
+  +-----+------+-----+
+  |            |     |
+工作区         Git   专用浏览器
+读 / 写             Playwright
+  |
+本地进程执行
+(shell:false / 输出限制 / 超时)
+        |
+        v
+      Windows / macOS / Linux
 ```
 
-**更新**：Skill 每天自动检查一次 GitHub，有新版本会自动更新并继续任务，
-无需任何操作；也可以随时对 Codex 说"更新 Codex with ChatGPT"。
+当前 MCP 能力包括：
 
-## 安装 → 配置 → 使用（手动版）
+- 工作区识别、目录、文件读取、搜索
+- Git status / diff
+- 执行记录读取
+- 工作区文件写入
+- 本地进程执行
+- 专用 Playwright 浏览器的 navigate / snapshot / click / type
 
-1. 安装 Codex Skill：把 `skill/` 复制到 `~/.codex/skills/codex-with-chatgpt/`。
-2. 对 Codex 说：**"使用 Codex with ChatGPT 完成首次配置。"**
-3. 之后正常使用：**"使用 Codex with ChatGPT，帮我实现 XXX。"**
+直接控制权限已经拆分为：
 
-说明书到此结束。你不需要知道 MCP、OAuth、Tunnel、端口、localhost 是什么——
-Codex 会自动完成所有配置，你只会看到：
+- `workspace.write`：仅写工作区内文件
+- `process.run`：运行本地可执行程序；**这是当前 OS 用户权限下的主机级代码执行能力，属于高权限能力**
+- `browser.control`：控制 ChatX 自己的专用浏览器 Profile
+- `workspace.control`：旧版宽权限，仅为了兼容现有已配对连接继续保留
 
-```
-Codex with ChatGPT
+## 传输方式
 
-✓ 当前项目已识别
-✓ Workspace Bridge 已启动
-✓ 安全连接已建立
-✓ ChatGPT 已连接
-✓ 文件读取测试通过
+ChatX 核心不绑定某一家 Tunnel：
 
-Ready.
-```
+- **Cloudflare Quick / Named Tunnel**：当前默认，已在真实 ChatGPT 环境长期使用。公网 MCP 由 ChatX OAuth + 一次性配对码保护。
+- **OpenAI Secure MCP Tunnel（实验性）**：官方 `tunnel-client` 主动连 OpenAI，再转发到本机 loopback MCP。支持 managed runtime、健康检查、Windows 单独代理注入，不产生 ChatX 公网 URL。
+- **Local**：仅 localhost，开发和测试使用。
 
-唯一可能需要你动手的步骤：登录 ChatGPT（如果要用固定域名，再登录一次 Cloudflare）。**新仓库**还会请你在 ChatGPT 里建一次项目（合集）：名字用仓库名，记忆选「仅限项目记忆」。侧栏如果没有「项目」，把鼠标放在「聊天」上，点右边三个点，选「按项目整理」。之后对话都从合集页开，不用回首页。已经在用的仓库默认还是原来的一条长对话，除非你说要改成 Project。
+## 从源码安装
 
-### 可选的固定域名
-
-默认公网地址是临时的，桥重启后会变。Codex 会删掉这个项目的 ChatGPT 插件再按新地址加回去。
-
-如果你有 Cloudflare 账号，并且域名已经加在 Cloudflare 上，首次配置时（老用户则在下一次编码时问一次）会问你要不要用固定域名，例如 `c2c-<项目>.你的域名`。选是的话，浏览器里授权一次 Cloudflare 即可。之后重启一般不用再改插件。没有账号、不想用、登录失败：继续用临时地址，功能一样，只是修复更慢。
-
-凭证放在系统目录，不进项目。
-
-## 工作原理
-
-```
-             ┌───────────────────────────┐
-             │      ChatGPT 网页版       │
-             │   推理 / 规划 / 审查      │
-             └──────────┬──────────▲─────┘
-                        │          │
-               MCP      │          │ Computer Use
-              数据面    │          │ 控制面（消息 < 1 KB）
-                        ▼          │
-             ┌─────────────────────┐
-             │      C2C Bridge     │   仅监听本机回环地址
-             │  只读 MCP           │   OAuth 2.1 + 一次性配对码
-             │  OAuth + 配对       │   Cloudflare Quick Tunnel
-             │  Tunnel 管理        │
-             └──────────┬──────────┘
-                        │  只读
-                        ▼
-             ┌─────────────────────┐          ┌─────────────────────┐
-             │     本地工作区      │◀─────────│    Codex Harness    │
-             └─────────────────────┘ 编辑/git │  Shell / 测试 / 修复 │
-                                              └─────────────────────┘
-```
-
-- **控制面（Computer Use）**：Codex 与 ChatGPT 之间只交换极小的结构化 `[C2C]`
-  状态消息——`INIT → PLAN → EXECUTED → REVIEW → DONE`。绝不粘贴 diff、日志
-  或文件内容。
-- **数据面（MCP）**：ChatGPT 缺什么自己拉什么，共 8 个只读工具：
-  `workspace_info`、`list_directory`、`read_file`、`search_workspace`、
-  `git_status`、`git_diff`、`test_status`、`execution_summary`。
-- **独立审查**：Codex 执行完毕后，ChatGPT 通过 MCP 亲自检查真实的 git diff
-  和测试记录——绝不因为 Codex 说"测试全过"就直接相信。
-
-## 安全模型（简版）
-
-- **从构造上只读**：服务端根本不存在写文件/删除/Shell/提交类工具，任何提示
-  注入都无法启用它们。
-- **一个工作区 = 一道边界**：每个令牌绑定单一工作区；路径校验基于规范化
-  realpath（symlink、`../`、绝对路径逃逸全部被拦截并有测试覆盖）。
-- **敏感文件永不外泄**：`.env*`、密钥、SSH、各类凭据默认拒绝
-  （`.env.example` 放行）；`.c2cignore` 可追加自定义规则。
-- **知道 URL 不等于有权限**：公网 MCP 端点强制 OAuth 2.1（PKCE S256、动态
-  客户端注册、refresh token 轮换）。无令牌：401；令牌属于别的工作区：403。
-- **模型永远接触不到长期凭据**：唯一会出现在浏览器里的秘密是一次性配对码
-  （5 分钟有效、限 5 次尝试、限速、用后即毁）。
-
-完整威胁模型：[docs/security.md](docs/security.md)
-
-## 开发者
+需要 Node.js 20+、Git。Cloudflare 模式还需要 `cloudflared`。
 
 ```bash
-pnpm install
-pnpm build          # 产出 dist/，暴露 c2c 命令
-pnpm test           # vitest：76 个测试（路径安全、OAuth、配对、MCP 端到端）
-
-c2c setup           # 一条命令：Bridge + 隧道 + 配对码
-c2c sandbox-allow   # 把本地设置目录加入 Codex 沙箱白名单（macOS / Windows）
-c2c status / doctor / pair / unpair / logs / stop
+git clone https://github.com/Tyr1onX/ChatX.git
+cd ChatX
+corepack pnpm install
+corepack pnpm build
+node bin/c2c.js --version
 ```
 
-环境要求：Node.js >= 20、git；公网连接需要 `cloudflared`
-（自动检测，Skill 会替你安装）。
+对外主 CLI 是 `chatx`；`c2c` 作为兼容别名继续保留。源码 checkout 可以：
 
-文档：[架构](docs/architecture.md) · [协议](docs/protocol.md) ·
-[安全](docs/security.md) · [故障排查](docs/troubleshooting.md)
-
-## 目录结构
-
-```
-src/
-  bridge/     本机回环 HTTP 服务、端口自动恢复、管理 API
-  mcp/        8 个只读工具、无状态 Streamable HTTP
-  auth/       OAuth 2.1（PKCE、动态注册、refresh 轮换、吊销）
-  pairing/    一次性配对码（CSPRNG、TTL、限速）
-  workspace/  路径收敛、敏感文件策略、搜索、git
-  tunnel/     TunnelProvider 抽象 + Cloudflare Quick Tunnel
-  execution/  审查闭环所需的执行记录
-  process/    守护进程生命周期
-  cli/        c2c 命令行
-skill/        Codex Skill（真正的 UX 层）
-tests/        单元 + 集成测试
-docs/         架构 / 协议 / 安全 / 故障排查
+```bash
+npm link
+chatx --version
 ```
 
-## 状态与声明
+对某个项目：
 
-V1。已端到端验证：Bridge、OAuth + 配对、公网隧道、ChatGPT 连接器配置、
-零操作首次配置体验。
+```bash
+chatx setup -w /你的/项目路径
+chatx status -w /你的/项目路径
+chatx doctor -w /你的/项目路径
+```
 
-**非官方社区项目，与 OpenAI 无关联，未获其背书。**
+仓库里的 `skill/SKILL.md` 可安装给 Codex，让它自动处理 ChatX 的安装、连接维护和排障。
 
-## 许可证
+## 发布包
 
-[MIT](LICENSE)
+每个 tag 版本都必须通过：
+
+```text
+测试
+TypeScript typecheck
+build
+生产依赖 audit
+真正的 npm tarball 全新安装 smoke
+```
+
+GitHub Release 自动生成 `.tgz` 和 `SHA256SUMS.txt`。
+
+发布包使用明确白名单，只包含运行所需的 `dist/`、CLI、文档、Skill、示例、README 和 License，不包含 `src/`、`tests/`。这专门修复了之前已经实测确认的发布缺陷：旧包没有 `dist/`，全新安装后会尝试加载开发依赖 `tsx` 并直接报错。
+
+## 安全边界
+
+ChatX 的能力很强，所以发布版不再使用“ChatGPT 没有写/执行能力”这种错误安全承诺，而是明确能力边界：
+
+- Bridge HTTP 只绑定 `127.0.0.1 / ::1 / localhost`
+- Cloudflare 公网路径必须经过 ChatX OAuth，token 与单一 workspace 绑定
+- OpenAI Tunnel 模式下，MCP 目标仍只在 loopback；远端身份由 OpenAI Tunnel 权限承担，本机仍由 ChatX 执行工作区/敏感文件/进程/浏览器规则
+- 文件路径 canonicalize，拦截 `..`、绝对路径逃逸、符号链接逃逸
+- `.env`、SSH key、私钥、云凭据、`.npmrc` 等默认不可读取/写入
+- `.chatxignore` 可以额外屏蔽项目文件；旧 `.c2cignore` 继续兼容
+- `write_file` 受 workspace 边界和 1 MiB 限制
+- `run_command` 使用 `executable + args`，默认 `shell:false`，限制输出和超时；**但被启动的程序本身仍可能访问当前 Windows/macOS/Linux 用户有权限访问的主机资源**
+- 浏览器使用独立 Profile，不自动接管你的正常 Chrome Profile
+- OpenAI Tunnel runtime key 只通过环境变量引用，不写入项目、Git 或 ChatX 状态文件
+
+启用 `process.run` 等权限前建议先读：[docs/security.md](docs/security.md)。
+
+## 兼容旧版本
+
+这次改名不会粗暴破坏现有用户：
+
+- `c2c` 命令继续有效
+- 旧 `workspace.control` token 继续能调用新拆分后的控制能力
+- 已保存的 ChatGPT Connector 名称不会强制改名
+- 当前 alpha 仍复用旧 `codex-with-chatgpt` OS 状态目录，因此现有 OAuth token、Tunnel 元数据、session、日志不会因为改名丢失
+- 新环境变量优先使用 `CHATX_*`，旧 `C2C_*` 仍兼容
+
+## 开发 / 发布门禁
+
+```bash
+corepack pnpm test
+corepack pnpm typecheck
+corepack pnpm build
+corepack pnpm audit --prod
+corepack pnpm release:smoke
+```
+
+CI 当前覆盖 Windows + Ubuntu，Node.js 20 / 22。
+
+## 当前版本目标
+
+`v0.1.0-alpha.1` 的重点不是继续堆功能，而是把已经能用的桥真正做成一个可以公开测试的项目：
+
+- 正式 ChatX 品牌
+- Cloudflare / OpenAI / Local transport 抽象
+- 细粒度权限
+- 与真实能力一致的安全文档
+- 可重复的发布包
+- 跨平台 CI
+- clean install 发布验收
+
+**这是非官方社区项目，与 OpenAI、Cloudflare 无隶属或背书关系。**
+
+## 上游与许可证
+
+ChatX 从 [XiaoDuoYa/codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt) 演化而来。原 Git 历史和 MIT License 保留。见 [LICENSE](LICENSE)。

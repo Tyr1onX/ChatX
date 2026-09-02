@@ -96,6 +96,52 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(result.stdout).toBe("direct-control-ok");
   });
 
+  it("enforces the new narrow direct-control scopes while keeping legacy workspace.control tests above", async () => {
+    const makeScopedClient = async (clientId: string, scopes: string[]) => {
+      const scoped = new Client({ name: clientId, version: "1.0.0" });
+      const tokens = bridge.authStore.issueTokens({ clientId, scopes });
+      const transport = new StreamableHTTPClientTransport(new URL(`${bridge.localBaseUrl()}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${tokens.accessToken}` } },
+      });
+      await scoped.connect(transport);
+      return scoped;
+    };
+
+    const writer = await makeScopedClient("writer-only", ["workspace.write"]);
+    try {
+      const writeResult = await writer.callTool({
+        name: "write_file",
+        arguments: { path: "writer-only.txt", content: "ok\n" },
+      });
+      expect(writeResult.isError ?? false).toBe(false);
+      const deniedRun = await writer.callTool({
+        name: "run_command",
+        arguments: { command: process.execPath, args: ["-e", "process.stdout.write('no')"] },
+      });
+      expect(deniedRun.isError).toBe(true);
+      expect(textOf(deniedRun)).toContain("process.run");
+    } finally {
+      await writer.close();
+    }
+
+    const runner = await makeScopedClient("runner-only", ["process.run"]);
+    try {
+      const runResult = await runner.callTool({
+        name: "run_command",
+        arguments: { command: process.execPath, args: ["-e", "process.stdout.write('runner-ok')"] },
+      });
+      expect(jsonOf<{ stdout: string }>(runResult).stdout).toBe("runner-ok");
+      const deniedWrite = await runner.callTool({
+        name: "write_file",
+        arguments: { path: "runner-should-not-write.txt", content: "no\n" },
+      });
+      expect(deniedWrite.isError).toBe(true);
+      expect(textOf(deniedWrite)).toContain("workspace.write");
+    } finally {
+      await runner.close();
+    }
+  });
+
   it("workspace_info returns identity and project detection", async () => {
     const result = await client.callTool({ name: "workspace_info", arguments: {} });
     const info = jsonOf<{ workspaceId: string; projectType: string; frameworks: string[]; git: { isRepo: boolean; branch: string } }>(result);
