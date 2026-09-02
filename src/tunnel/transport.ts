@@ -17,7 +17,9 @@ export function cloudflareTransport(provider: string, publicUrl: string): Transp
 
 export function openAITransport(tunnelId: string): TransportDescriptor {
   const normalized = tunnelId.trim();
-  if (!/^tunnel_[A-Za-z0-9_-]+$/.test(normalized)) throw new Error("Invalid OpenAI tunnel id.");
+  if (!/^tunnel_[0-9a-f]{32}$/.test(normalized)) {
+    throw new Error("Invalid OpenAI tunnel id; expected tunnel_<32 lowercase hexadecimal characters>.");
+  }
   return { kind: "openai", provider: "openai-secure-mcp", publicUrl: null, tunnelId: normalized };
 }
 

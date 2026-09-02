@@ -1,17 +1,19 @@
 import path from "node:path";
 import { getStateDir, readJsonIfExists, writeSecureJson } from "../config/paths.js";
 
-export type TunnelPreference = "unset" | "quick" | "named";
+export type TunnelPreference = "unset" | "quick" | "named" | "openai";
 
 export interface TunnelState {
   workspaceId: string;
   preference: TunnelPreference;
   askedAt?: string;
-  provider?: "cloudflare-quick" | "cloudflare-named";
+  provider?: "cloudflare-quick" | "cloudflare-named" | "openai-secure-mcp";
   tunnelName?: string;
   tunnelId?: string;
   hostname?: string;
   zone?: string;
+  openaiAlias?: string;
+  runtimeKeyEnv?: string;
   configuredAt?: string;
   fallbackReason?: string;
 }
@@ -49,6 +51,53 @@ export function isNamedTunnelReady(state: TunnelState): boolean {
 export function namedTunnelBinding(state: TunnelState): { tunnelName: string; hostname: string } | null {
   if (!isNamedTunnelReady(state) || !state.tunnelName || !state.hostname) return null;
   return { tunnelName: state.tunnelName, hostname: state.hostname };
+}
+
+export function isOpenAITunnelReady(state: TunnelState): boolean {
+  return (
+    state.preference === "openai" &&
+    /^tunnel_[0-9a-f]{32}$/.test(state.tunnelId ?? "") &&
+    Boolean(state.openaiAlias?.trim()) &&
+    Boolean(state.runtimeKeyEnv?.trim())
+  );
+}
+
+export function openAITunnelBinding(
+  state: TunnelState
+): { tunnelId: string; alias: string; runtimeKeyEnv: string } | null {
+  if (!isOpenAITunnelReady(state) || !state.tunnelId || !state.openaiAlias || !state.runtimeKeyEnv) return null;
+  return { tunnelId: state.tunnelId, alias: state.openaiAlias, runtimeKeyEnv: state.runtimeKeyEnv };
+}
+
+export function chooseOpenAITunnel(opts: {
+  workspaceId: string;
+  tunnelId: string;
+  alias?: string;
+  runtimeKeyEnv?: string;
+}): TunnelState {
+  const tunnelId = opts.tunnelId.trim();
+  if (!/^tunnel_[0-9a-f]{32}$/.test(tunnelId)) {
+    throw new Error("OpenAI tunnel id must match tunnel_<32 lowercase hexadecimal characters>.");
+  }
+  const alias = (opts.alias ?? `chatx-${opts.workspaceId.slice(0, 12)}`).trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(alias)) {
+    throw new Error("OpenAI tunnel alias is invalid.");
+  }
+  const runtimeKeyEnv = (opts.runtimeKeyEnv ?? "CONTROL_PLANE_API_KEY").trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(runtimeKeyEnv)) {
+    throw new Error("Runtime API key environment variable name is invalid.");
+  }
+  const now = new Date().toISOString();
+  return writeTunnelState({
+    workspaceId: opts.workspaceId,
+    preference: "openai",
+    askedAt: now,
+    provider: "openai-secure-mcp",
+    tunnelId,
+    openaiAlias: alias,
+    runtimeKeyEnv,
+    configuredAt: now,
+  });
 }
 
 export const TUNNEL_CHOICE_PROMPT = `连 ChatGPT 之前，有一条可选的。

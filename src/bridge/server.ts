@@ -10,8 +10,9 @@ import { createMcpServer } from "../mcp/server.js";
 import { createMcpHttpHandler } from "../mcp/http.js";
 import { CloudflaredQuickTunnel } from "../tunnel/cloudflared.js";
 import { CloudflaredNamedTunnel } from "../tunnel/cloudflared-named.js";
+import { OpenAISecureMcpTunnel } from "../tunnel/openai-secure.js";
 import type { TunnelProvider } from "../tunnel/provider.js";
-import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
+import { namedTunnelBinding, openAITunnelBinding, readTunnelState } from "../tunnel/state.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
@@ -19,7 +20,17 @@ import { writeRuntimeState, clearRuntimeState, type RuntimeState } from "./runti
 import { BrowserController } from "../browser/controller.js";
 
 function tunnelForWorkspace(workspaceId: string, logger: Logger): TunnelProvider {
-  const binding = namedTunnelBinding(readTunnelState(workspaceId));
+  const state = readTunnelState(workspaceId);
+  const openai = openAITunnelBinding(state);
+  if (openai) {
+    return new OpenAISecureMcpTunnel({
+      tunnelId: openai.tunnelId,
+      alias: openai.alias,
+      runtimeKeyEnv: openai.runtimeKeyEnv,
+      logger,
+    });
+  }
+  const binding = namedTunnelBinding(state);
   if (binding) {
     return new CloudflaredNamedTunnel({
       tunnelName: binding.tunnelName,
@@ -91,6 +102,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   const authStore = new AuthStore(workspace.id, { file: opts.authStoreFile });
   const pairing = new PairingManager(workspace.id, { ttlMs: opts.pairingTtlMs });
   const tunnel = opts.tunnelProvider ?? tunnelForWorkspace(workspace.id, logger);
+  const openAIPrivateTransport = tunnel.name === "openai-secure-mcp";
   const browser = new BrowserController();
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
 
@@ -115,27 +127,46 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
   // ---- OAuth + discovery ---------------------------------------------------
 
-  app.use(
-    createOAuthRouter({
-      store: authStore,
-      pairing,
-      workspaceName: workspace.name,
-      getBaseUrl,
-      logger,
-    })
-  );
+  // Cloudflare/public transports keep ChatX OAuth. OpenAI Secure MCP Tunnel
+  // supplies the remote identity boundary itself; its local target stays
+  // loopback-only because the authorization server is not tunnelled.
+  if (!openAIPrivateTransport) {
+    app.use(
+      createOAuthRouter({
+        store: authStore,
+        pairing,
+        workspaceName: workspace.name,
+        getBaseUrl,
+        logger,
+      })
+    );
+  }
 
-  // ---- MCP endpoint (bearer-protected) --------------------------------------
+  // ---- MCP endpoint ----------------------------------------------------------
 
   const mcpHandler = createMcpHttpHandler(() => createMcpServer({ workspace, logger, browser }), logger);
-  app.all(
-    "/mcp",
-    express.json({ limit: "8mb" }),
-    bearerAuth({ store: authStore, workspaceId: workspace.id, getBaseUrl, logger }),
-    (req: Request, res: Response) => {
-      void mcpHandler(req, res);
-    }
-  );
+  const handleMcp = (req: Request, res: Response): void => {
+    void mcpHandler(req, res);
+  };
+  if (openAIPrivateTransport) {
+    const loopbackOnly = (req: Request, res: Response, next: NextFunction): void => {
+      const remote = req.socket.remoteAddress ?? "";
+      const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+      if (!isLoopback) {
+        res.status(404).end();
+        return;
+      }
+      next();
+    };
+    app.all("/mcp", loopbackOnly, express.json({ limit: "8mb" }), handleMcp);
+  } else {
+    app.all(
+      "/mcp",
+      express.json({ limit: "8mb" }),
+      bearerAuth({ store: authStore, workspaceId: workspace.id, getBaseUrl, logger }),
+      handleMcp
+    );
+  }
 
   // ---- Admin API (loopback + admin token only; used by the CLI/Skill) --------
 
@@ -182,7 +213,13 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       .then((url) => {
         publicBaseUrl = url;
         persistRuntime();
-        res.json({ url });
+        const status = tunnel.status();
+        res.json({
+          url,
+          tunnelId: status.tunnelId ?? null,
+          provider: status.provider,
+          ready: status.ready ?? status.running,
+        });
       })
       .catch((error: Error) => {
         logger.error(`Tunnel start failed: ${error.message}`);

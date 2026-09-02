@@ -1,38 +1,104 @@
-# OpenAI Secure MCP Tunnel preparation
+# OpenAI Secure MCP Tunnel integration
 
-This branch prepares ChatX for an additional private transport without changing the currently deployed Cloudflare path.
+This branch contains an optional OpenAI Secure MCP Tunnel transport for ChatX. It is intentionally not the default and does not change the currently deployed Cloudflare path unless the user explicitly selects OpenAI mode and restarts/applies the bridge.
 
-## Non-goals for this preparation branch
+## Current status
 
-- Do not restart the running ChatX bridge.
-- Do not stop or reconfigure `cloudflared`.
-- Do not require an OpenAI runtime API key yet.
-- Do not change the default transport.
+Implemented and covered by automated tests:
 
-## Why the current abstraction needs one more layer
+- Cloudflare quick and named transports remain supported.
+- OpenAI Secure MCP Tunnel can be selected per workspace.
+- ChatX models private transports by `tunnel_id` instead of inventing a public URL.
+- The official `tunnel-client runtimes connect/status/stop` lifecycle is wrapped as a ChatX tunnel provider.
+- Runtime API keys are referenced by environment-variable name and are never written to ChatX tunnel state.
+- `TUNNEL_CLIENT_BIN` can point to a specific `tunnel-client` executable without modifying global `PATH`.
+- OpenAI mode keeps the MCP target on loopback and does not expose ChatX's local OAuth authorization route.
+- Cloudflare mode keeps the existing ChatX OAuth and bearer-token flow unchanged.
+- CLI start/setup/status/doctor understand both public URL transports and private tunnel-id transports.
 
-The existing `TunnelProvider` assumes every remote connection produces a public URL. Cloudflare satisfies that model. OpenAI Secure MCP Tunnel does not: ChatGPT selects an opaque `tunnel_id`, while `tunnel-client` reaches the local MCP server over loopback.
+Not performed by this branch:
 
-The neutral `TransportDescriptor` introduced in this branch can represent all three cases:
+- The currently running ChatX bridge is not restarted.
+- The currently running `cloudflared` process is not stopped or reconfigured.
+- No OpenAI tunnel is created or connected.
+- No runtime API key is requested, stored, or printed.
+- The default transport remains the existing Cloudflare behavior until the user explicitly chooses OpenAI mode.
 
-- `cloudflare`: public HTTPS MCP URL.
-- `openai`: private OpenAI tunnel id, no public ChatX URL.
-- `local`: loopback-only development.
-
-The next implementation step is to migrate bridge/CLI status from `publicUrl` as the source of truth to a transport descriptor while keeping the legacy Cloudflare behavior unchanged.
-
-## Planned OpenAI transport
-
-Future runtime shape:
+## Runtime architecture
 
 ```text
-ChatGPT -> OpenAI Secure MCP Tunnel -> tunnel-client -> http://127.0.0.1:<port>/mcp -> ChatX
+ChatGPT
+  -> OpenAI Secure MCP Tunnel
+  -> tunnel-client managed runtime
+  -> http://127.0.0.1:<port>/mcp
+  -> ChatX
+  -> workspace / process / browser capabilities
 ```
 
-`tunnel-client` should be treated as a supervised sidecar. ChatX must never persist or print the runtime API key. The key should enter through the environment or the official tunnel-client profile/secret mechanism.
+The provider starts an existing OpenAI tunnel with a command equivalent to:
+
+```text
+tunnel-client runtimes connect
+  --alias <local-alias>
+  --tunnel-id tunnel_<32-hex>
+  --runtime-api-key env:CONTROL_PLANE_API_KEY
+  --mcp-server-url http://127.0.0.1:<port>/mcp
+  --json
+```
+
+ChatX then verifies the managed runtime through `runtimes status <alias> --json` and requires it to report both `process_running` and `ready` before declaring the transport connected.
+
+## Authentication boundary
+
+Cloudflare/public mode and OpenAI/private mode intentionally have different remote identity boundaries.
+
+### Cloudflare
+
+```text
+ChatGPT -> public ChatX URL -> ChatX OAuth/bearer auth -> MCP
+```
+
+The existing pairing, OAuth scopes, and bearer middleware remain unchanged.
+
+### OpenAI Secure MCP Tunnel
+
+```text
+ChatGPT -> OpenAI tunnel authorization -> tunnel-client -> loopback MCP
+```
+
+OpenAI tunnels forward MCP traffic to a private local target, but ChatX's localhost authorization server is not made publicly reachable by that tunnel. Therefore OpenAI mode does not mount the ChatX OAuth authorization surface and accepts MCP only on the loopback listener. Remote access is controlled by the OpenAI tunnel/workspace authorization boundary; ChatX still enforces its workspace path, sensitive-file, command, and browser policies.
+
+This also means local processes running as the same user can reach the loopback MCP endpoint in OpenAI mode. If a stricter hostile-local-process threat model is required later, add a tunnel-target shared secret or another loopback authentication mechanism supported cleanly by the tunnel client.
+
+## Configuration prepared for later activation
+
+After `tunnel-client` is installed and an OpenAI tunnel has been created, ChatX can store the non-secret binding with:
+
+```text
+c2c tunnel choose --mode openai --tunnel-id tunnel_<32-hex>
+```
+
+Optional configuration:
+
+```text
+--alias <runtime-alias>
+--runtime-key-env <environment-variable-name>
+```
+
+The default runtime-key environment variable is `CONTROL_PLANE_API_KEY`. A custom binary can be supplied with `TUNNEL_CLIENT_BIN`.
+
+Do not put a literal runtime key in the repository, tunnel state, CLI arguments, or documentation.
 
 ## Latency benchmark plan
 
-Do not infer the faster transport from topology alone. Measure end-to-end MCP calls from ChatGPT for both transports using the same machine and workspace. Record at least 30 calls per path and compare median, p95, and reconnect behavior.
+Do not infer the faster transport from topology alone. When both transports can be connected on the same machine and workspace, run at least 30 equivalent end-to-end MCP calls per path and compare:
 
-Suggested low-cost probe: a read-only `transport_probe` MCP tool that returns server receive/send monotonic timestamps and a nonce. Add it only when both transports are ready to test.
+- median latency
+- p95 latency
+- maximum latency/outliers
+- first-call latency after idle
+- reconnect/recovery latency
+
+The benchmark must measure the full ChatGPT -> transport -> ChatX -> ChatGPT round trip. Localhost timing or ICMP ping alone is not representative.
+
+A later benchmark-only read tool may return a nonce plus server receive/send monotonic timestamps, but it should not be added until both live transports are available for A/B testing.
