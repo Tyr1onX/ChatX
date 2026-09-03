@@ -16,7 +16,7 @@ export function findBinary(name: string): string | null {
   const exe = process.platform === "win32" ? `${name}.exe` : name;
   try {
     const probe = spawnSync(exe, ["--version"], { stdio: "ignore", timeout: 5000, windowsHide: true });
-    if (probe.status === 0 || probe.status === 1) return exe; // on PATH
+    if (probe.status === 0 || probe.status === 1) return exe;
   } catch {
     // not on PATH
   }
@@ -34,14 +34,6 @@ export function findBinary(name: string): string | null {
   return null;
 }
 
-export interface TunnelBinaries {
-  cloudflared: string | null;
-  wrangler: string | null;
-}
-
-export function detectTunnelBinaries(): TunnelBinaries {
-  return {
-    cloudflared: findBinary("cloudflared"),
-    wrangler: findBinary("wrangler"),
-  };
+export function detectTunnelBinaries(): { cloudflared: string | null } {
+  return { cloudflared: findBinary("cloudflared") };
 }
