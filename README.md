@@ -36,51 +36,56 @@ ChatX（运行在你的电脑上）
 
 ChatX 不是远程桌面，也不会默认接管你平时使用的 Chrome。
 
-# 安装
+## 安装
 
-## 推荐：直接让你的 AI Agent 帮你配置
+### 推荐：让 AI Agent 帮你装
 
-如果你已经在使用 Codex、Claude Code、Cursor Agent 或其他能够操作本机终端的 AI Agent，最省事的方式不是自己照着几十条命令安装，而是把下面这段话直接交给它：
+如果你已经在使用 Codex、Claude Code、Cursor Agent 或其他能够操作本机终端的 AI Agent，推荐直接让它完成安装。
+
+#### 用 Codex
+
+把下面这段话发给 Codex 就可以：
+
+```text
+请帮我把 ChatX 安装到本机，并为我当前正在工作的项目配置好：
+https://github.com/Tyr1onX/ChatX
+
+先阅读仓库里的 skill/SKILL.md，并按其中的 first-time setup 完成。
+能自动完成的步骤都直接完成；只有登录、验证码、2FA 或必须由我确认的授权再叫我操作。
+完成后运行 chatx doctor，并确认当前 Workspace 和连接都正常。
+不要为了安装 ChatX 修改我项目的业务代码。
+```
+
+ChatX 已经为 Codex 提供专门的 `skill/SKILL.md`，里面包含安装、连接、维护和排障流程。
+
+#### 其他 AI Agent
+
+把下面这段话交给能够执行本机命令的 Agent：
 
 ```text
 请帮我在这台电脑上安装并配置 ChatX：
 https://github.com/Tyr1onX/ChatX
 
-目标：让 ChatGPT 能安全访问我当前正在工作的项目目录。
-
-请先阅读仓库里的 docs/agent-setup.md，并按里面的首次安装流程完成。
-如果你是 Codex，再同时阅读 skill/SKILL.md，并优先遵循其中的 ChatX 工作流。
+目标是让 ChatGPT 能安全访问我当前正在工作的项目目录。
+请先阅读仓库里的 docs/agent-setup.md，并按其中的首次安装流程完成。
 
 能自动完成的步骤直接完成，不要让我手动复制命令。
 只有遇到登录、验证码、2FA 或明确的授权确认时再让我操作。
-安装完成后运行 chatx doctor，并验证本地 Bridge、连接和当前 Workspace 都正常。
+完成后运行 chatx doctor，并确认当前 Workspace 和连接都正常。
 不要修改当前项目的业务代码来完成安装。
 ```
 
-然后让 Agent 自己处理 Node.js、`cloudflared`、ChatX 安装、启动、诊断等步骤即可。
+如果 Agent 能操作 ChatGPT 的 Connector 设置，它可以继续把连接也配置好；如果不能，只需要让它告诉你最后一个必须由你完成的步骤。
 
-如果 Agent 能操作 ChatGPT 的连接器设置，它还可以继续完成连接；如果不能，它应该只把最后必须由你完成的那一步告诉你。
+完整的 Agent 执行规范见 [docs/agent-setup.md](docs/agent-setup.md)。
 
-### Codex 用户
-
-ChatX 仓库内已经提供专门的：
-
-```text
-skill/SKILL.md
-```
-
-它包含 Codex 如何安装 ChatX、维护连接、排障以及与 ChatGPT 配合的完整流程。对于 Codex 用户，推荐直接让 Codex读取并执行这个 Skill，而不是人工逐条操作。
-
-## 手动安装
+### 手动安装
 
 如果你希望自己完成，最短流程如下。
 
-### 1. 准备依赖
+#### 1. 准备依赖
 
-需要：
-
-- Node.js 20+
-- `cloudflared`（默认连接方式）
+需要 Node.js 20+ 和 `cloudflared`。
 
 Windows：
 
@@ -95,7 +100,7 @@ macOS：
 brew install node cloudflared
 ```
 
-### 2. 安装 ChatX
+#### 2. 安装 ChatX
 
 ```bash
 npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
@@ -107,9 +112,7 @@ npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1
 chatx --version
 ```
 
-### 3. 在目标项目里启动
-
-进入你希望 ChatGPT 操作的项目目录：
+#### 3. 在目标项目里启动
 
 ```bash
 cd /path/to/your/project
@@ -118,7 +121,7 @@ chatx setup
 
 ChatX 会启动本机 Bridge，并输出连接地址和配对信息。
 
-### 4. 连接 ChatGPT
+#### 4. 连接 ChatGPT
 
 在 ChatGPT 的自定义 Connector / Developer Mode 中添加 `chatx setup` 输出的地址，并完成 OAuth 配对。
 
@@ -130,11 +133,9 @@ ChatX 会启动本机 Bridge，并输出连接地址和配对信息。
 
 如果 ChatGPT 能看到你本机项目的真实文件，说明完整链路已经工作。
 
-# 日常使用
+## 日常使用
 
-安装完成后，通常不需要再操作 ChatX。
-
-直接和 ChatGPT 说你要做什么即可。
+安装完成后，通常不需要再操作 ChatX。直接和 ChatGPT 说你要做什么即可。
 
 需要检查状态或自动修复时：
 
@@ -142,7 +143,7 @@ ChatX 会启动本机 Bridge，并输出连接地址和配对信息。
 chatx doctor
 ```
 
-常用命令只有这些：
+常用命令：
 
 ```bash
 chatx status     # 查看当前状态
@@ -154,7 +155,7 @@ chatx stop       # 停止当前 Workspace 的 Bridge
 
 更完整的问题处理见 [排障文档](docs/troubleshooting.md)。
 
-# 安全
+## 安全
 
 ChatX 可以获得较强的本机能力，因此请只把它连接到你信任的 AI 客户端，并只授权你愿意开放的项目。
 
@@ -164,7 +165,7 @@ ChatX 可以获得较强的本机能力，因此请只把它连接到你信任�
 
 详细边界见 [安全说明](docs/security.md)。
 
-# 更多文档
+## 更多文档
 
 - [给 AI Agent 的安装说明](docs/agent-setup.md)
 - [排障](docs/troubleshooting.md)
