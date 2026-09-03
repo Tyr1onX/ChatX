@@ -21,6 +21,21 @@ function jsonOf<T = Record<string, unknown>>(result: { content?: unknown }): T {
   return JSON.parse(textOf(result)) as T;
 }
 
+async function waitForProcessOutput(processId: string, needle: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const result = jsonOf<{ stdout: { text: string }; stderr: { text: string } }>(
+      await client.callTool({
+        name: "process_read",
+        arguments: { process_id: processId, max_chars: 65536 },
+      })
+    );
+    if (result.stdout.text.includes(needle) || result.stderr.text.includes(needle)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for managed process output: ${needle}`);
+}
+
 beforeAll(async () => {
   isolateStateDir();
   root = makeTmpDir("mcp-ws");
@@ -69,6 +84,11 @@ describe("MCP tools over Streamable HTTP", () => {
       "git_diff",
       "git_status",
       "list_directory",
+      "process_list",
+      "process_read",
+      "process_start",
+      "process_stop",
+      "process_write",
       "read_file",
       "run_command",
       "search_workspace",
@@ -79,6 +99,42 @@ describe("MCP tools over Streamable HTTP", () => {
     for (const forbidden of ["delete_file", "execute_shell", "git_commit", "install_package"]) {
       expect(names).not.toContain(forbidden);
     }
+  });
+
+  it("keeps managed processes alive across stateless MCP calls", async () => {
+    const script = [
+      "process.stdout.write('ready\\n')",
+      "process.stdin.setEncoding('utf8')",
+      "process.stdin.on('data', (data) => process.stdout.write('echo:' + data))",
+      "setInterval(() => {}, 1000)",
+    ].join(";");
+
+    const started = jsonOf<{ id: string; status: string }>(
+      await client.callTool({
+        name: "process_start",
+        arguments: { command: process.execPath, args: ["-e", script] },
+      })
+    );
+    expect(started.status).toBe("running");
+
+    await waitForProcessOutput(started.id, "ready");
+    const written = await client.callTool({
+      name: "process_write",
+      arguments: { process_id: started.id, text: "hello\\n" },
+    });
+    expect(written.isError ?? false).toBe(false);
+    await waitForProcessOutput(started.id, "echo:hello");
+
+    const listed = jsonOf<{ processes: { id: string; status: string }[] }>(
+      await client.callTool({ name: "process_list", arguments: {} })
+    );
+    expect(listed.processes.some((processInfo) => processInfo.id === started.id)).toBe(true);
+
+    const stopped = await client.callTool({
+      name: "process_stop",
+      arguments: { process_id: started.id },
+    });
+    expect(stopped.isError ?? false).toBe(false);
   });
 
   it("applies precise workspace patches over MCP", async () => {
@@ -153,6 +209,9 @@ describe("MCP tools over Streamable HTTP", () => {
       });
       expect(deniedRun.isError).toBe(true);
       expect(textOf(deniedRun)).toContain("process.run");
+      const deniedProcessList = await writer.callTool({ name: "process_list", arguments: {} });
+      expect(deniedProcessList.isError).toBe(true);
+      expect(textOf(deniedProcessList)).toContain("process.run");
     } finally {
       await writer.close();
     }
@@ -164,6 +223,8 @@ describe("MCP tools over Streamable HTTP", () => {
         arguments: { command: process.execPath, args: ["-e", "process.stdout.write('runner-ok')"] },
       });
       expect(jsonOf<{ stdout: string }>(runResult).stdout).toBe("runner-ok");
+      const processList = await runner.callTool({ name: "process_list", arguments: {} });
+      expect(processList.isError ?? false).toBe(false);
       const deniedWrite = await runner.callTool({
         name: "write_file",
         arguments: { path: "runner-should-not-write.txt", content: "no\n" },
