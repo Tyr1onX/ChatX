@@ -2,20 +2,79 @@
 
 这份文档是给能够操作用户本机终端的 AI Agent 阅读的。
 
-目标不是向用户解释 ChatX 的内部实现，而是尽可能自动完成首次安装、连接准备和验证，只在确实需要用户本人参与时请求操作。
-
-## 目标
-
-在用户指定的 Workspace 上完成：
-
-1. 检查并安装运行依赖
-2. 安装 ChatX 当前公开版本
-3. 启动该 Workspace 的 ChatX Bridge
-4. 建立可供 ChatGPT 使用的连接
-5. 输出或继续处理 Connector / OAuth 配对信息
-6. 运行诊断并确认本地链路正常
+目标不是只把 ChatX 软件装上，而是尽可能把 **本机环境、外部连接条件、ChatGPT Connector 和端到端验证** 连续完成。只有在确实需要用户本人参与时才请求操作，并在用户完成后继续后续步骤。
 
 不要为了安装 ChatX 修改用户项目的业务代码。
+
+## 完成定义
+
+只有下面四层都达到预期，才能把“ChatX 已配置完成”汇报给用户：
+
+1. **Local** — ChatX 已安装，目标 Workspace 正确，Bridge 正常
+2. **Transport** — 当前 Workspace 已有可用的公网连接地址
+3. **ChatGPT** — 当前 Workspace 对应的自定义 MCP Connector 已创建并完成 OAuth / 配对
+4. **End-to-end** — ChatGPT 通过该 Connector 能真实读取目标 Workspace
+
+如果只完成了 `npm install`、`chatx setup` 或本机 `doctor`，不要声称完整配置已经完成。
+
+## 外部条件清单
+
+首次开始前先判断这些条件，不要等本机都装完才发现外部条件缺失。
+
+### 必需：ChatGPT 自定义 MCP 能力
+
+用户的 ChatGPT 账号 / Workspace 必须能够使用自定义 MCP Connector / Developer Mode 或对应能力。
+
+这是外部产品权限，不是 ChatX 可以安装出来的功能。
+
+如果用户账号没有入口：
+
+- 可以继续完成 ChatX 本机安装和本地诊断
+- 必须明确标记 `ChatGPT Connector blocked by account/workspace capability`
+- 不要反复重装 ChatX
+- 不要声称端到端配置成功
+
+### 必需：ChatGPT 登录
+
+首次创建 Connector、OAuth 授权、验证码、2FA 等步骤可能要求用户本人操作。
+
+Agent 可以导航或填写非敏感表单，但不要读取、打印或保存用户 Cookie、OAuth token、浏览器 Session 等凭据。
+
+### 可选：Cloudflare 账号和域名
+
+**Cloudflare 账号和自己的域名不是使用 ChatX 的硬性要求。**
+
+ChatX 支持两种主要连接选择：
+
+#### Quick / 临时地址
+
+适合没有 Cloudflare 账号或域名的用户：
+
+- 不需要 Cloudflare 登录
+- 不需要自己的域名
+- 可以直接建立临时公网地址
+- 地址在电脑重启或 Tunnel 重建后可能变化
+- 地址变化后需要修复 / 重建当前 Workspace 的 ChatGPT Connector
+
+#### Named / 固定域名
+
+适合已经长期使用 Cloudflare 的用户：
+
+需要：
+
+- Cloudflare 账号
+- 一个已经托管在 Cloudflare 的域名
+- 首次配置时完成 Cloudflare 登录 / 授权
+
+优点是公网地址稳定，通常不需要因为电脑重启而反复更新 Connector。
+
+如果用户没有 Cloudflare 账号或域名，直接使用 Quick，不要把“先注册 Cloudflare / 买域名”作为阻塞条件。
+
+### 实验性：OpenAI Secure MCP Tunnel
+
+仅当当前 ChatGPT / OpenAI 环境确实具备对应能力并且用户明确希望使用时再选择。
+
+不要把它作为普通新用户的默认路径。
 
 ## 用户交互原则
 
@@ -23,15 +82,23 @@
 
 仅在以下情况请求用户操作：
 
-- 账号登录
+- ChatGPT / Cloudflare 等账号登录
 - CAPTCHA
 - 2FA
 - 操作系统或第三方服务明确要求的授权 / consent
-- Agent 本身没有能力操作 ChatGPT Connector UI，需要用户完成最后一步
+- Agent 本身没有能力操作 ChatGPT Connector UI
+- 用户需要在 Quick 和已有 Cloudflare 固定域名之间做真实偏好选择
+
+请求用户操作时：
+
+1. 每次只给 **当前必须完成的一步**
+2. 不要把后续十几步一起扔给用户
+3. 用户完成后，Agent 必须继续原来的安装 / 验证流程
+4. 不要以“请自行完成后续配置”提前结束任务
 
 不要让用户手动执行一串本来可以由 Agent 自己执行的命令。
 
-不要读取、打印或复制 OAuth token、Cookie、浏览器 Session、私钥等凭据。ChatX 的一次性配对码可以按正常流程用于授权。
+ChatX 的一次性配对码可以按正常流程用于授权，但不要读取、打印或复制 OAuth token、Cookie、浏览器 Session、私钥等长期凭据。
 
 ## 0. 确定 Workspace
 
@@ -53,7 +120,7 @@
 
 避免误连到错误项目。
 
-## 1. 检查依赖
+## 1. 检查本机依赖
 
 ChatX 需要 Node.js 20+。
 
@@ -119,7 +186,43 @@ chatx --version
 
 如果机器已经安装 ChatX，不要无条件重复安装。先确认版本与运行状态。
 
-## 3. 首次配置
+## 3. 选择公网连接方式
+
+先检查当前 Workspace 是否已经做过选择：
+
+```bash
+chatx tunnel status -w <WORKSPACE> --json
+```
+
+如果已有有效偏好，不要无理由改动。
+
+如果需要首次选择：
+
+### 用户没有 Cloudflare 账号 / 域名，或只想最快开始
+
+使用 Quick：
+
+```bash
+chatx tunnel choose -w <WORKSPACE> --mode quick --json
+```
+
+不要要求 Cloudflare 登录。
+
+### 用户已有托管在 Cloudflare 的域名，并希望固定地址
+
+确认真实域名后使用 Named：
+
+```bash
+chatx tunnel choose -w <WORKSPACE> --mode named --zone <DOMAIN> --json
+```
+
+该流程可能打开 Cloudflare 登录 / 授权页面。
+
+这是允许请求用户参与的交互步骤。用户完成后继续执行，不要停在这里。
+
+如果 Named 配置失败并且 ChatX 提供 Quick fallback，优先保证用户先可用；之后再根据用户意愿升级到固定域名。
+
+## 4. 首次配置
 
 对目标 Workspace 执行：
 
@@ -141,6 +244,13 @@ pairingExpiresAt
 tunnel
 ```
 
+确认：
+
+- `workspaceName` 对应真实 `<WORKSPACE>`
+- Bridge 已启动
+- `mcpUrl` 是当前有效公网地址
+- 当前 tunnel 与前一步选择一致
+
 如果配对码过期：
 
 ```bash
@@ -149,27 +259,52 @@ chatx pair -w <WORKSPACE> --json
 
 不要在项目目录中保存连接凭据。
 
-## 4. ChatGPT Connector
+## 5. 配置 ChatGPT Connector
 
-如果 Agent 具备受支持的 ChatGPT UI / Connector 操作能力，可以继续完成：
+这是完整安装里不可省略的一层。
 
-1. 确认 ChatGPT 账号 / Workspace 已开放自定义 MCP Connector 或对应 Developer Mode
-2. 使用 `connectorName` 创建当前 Workspace 对应的 Connector
-3. Server URL 使用 `mcpUrl`
-4. Authentication 使用 OAuth
-5. 在授权流程中使用 ChatX 的一次性 `pairingCode`
+如果 Agent 具备受支持且可靠的 ChatGPT UI / Connector 操作能力，可以继续完成：
 
-不要修改或删除属于其他 Workspace 的 Connector。
+1. 确认用户已登录 ChatGPT
+2. 确认账号 / Workspace 已开放自定义 MCP Connector / Developer Mode
+3. 为当前 Workspace 创建或修复 `connectorName` 对应的 Connector
+4. Server URL 使用当前 `mcpUrl`
+5. Authentication 使用 OAuth
+6. 在授权流程中使用当前有效的一次性 `pairingCode`
+7. 等待 Connected / authorized / pairing accepted 等明确成功状态
 
-如果 Agent 不具备可靠的 ChatGPT UI 操作能力，不要假装已经完成。只向用户说明最后一个必须由用户完成的动作，并提供：
+一个 Workspace 只维护它自己的 Connector。不要修改或删除属于其他 Workspace 的 Connector。
+
+### Agent 不能操作 ChatGPT UI 时
+
+不要假装已经完成。
+
+只向用户说明 **当前唯一需要手工完成的动作**。例如：
+
+> 请打开 ChatGPT 的自定义 Connector 页面，为“<connectorName>”添加连接。我已经准备好地址和配对信息；完成授权后告诉我“好了”，我会继续验证。
+
+如果必须提供具体值，可以给：
 
 - Connector 名称
 - MCP 地址
 - 当前有效的一次性配对码
 
-如果用户的 ChatGPT 账号根本没有对应功能，需要明确说明这是 ChatGPT 产品权限限制，而不是 ChatX 本机安装失败。
+用户完成后必须继续执行第 6 节验证。
 
-## 5. 验证
+### ChatGPT 根本没有 Connector 能力时
+
+明确区分状态：
+
+```text
+Local ChatX: READY
+Public connection: READY
+ChatGPT Connector: BLOCKED — account/workspace capability unavailable
+End-to-end: NOT VERIFIED
+```
+
+不要把这个问题误诊断成本机安装失败。
+
+## 6. 验证
 
 本机运行：
 
@@ -178,25 +313,92 @@ chatx status -w <WORKSPACE> --json
 chatx doctor -w <WORKSPACE> --json
 ```
 
-成功标准至少包括：
+本机成功标准至少包括：
 
 - 当前 Workspace 身份正确
 - Bridge 正常运行
 - 本地 MCP 检查正常
-- 所选连接方式处于正常状态，或本地模式符合用户预期
+- 所选连接方式处于正常状态
 - 没有需要继续处理的 repair 状态
 
 如果 `doctor` 能安全自动修复问题，优先让它修复，而不是直接要求用户重装。
 
-如果 ChatGPT Connector 已完成连接，再进行一次只读端到端验证：
+### 必须做真实端到端验证
+
+如果 ChatGPT Connector 已完成连接，再发送一个只读任务：
 
 ```text
 列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
 ```
 
-确认返回内容确实对应 `<WORKSPACE>` 后，首次配置才算完整成功。
+确认返回内容确实来自 `<WORKSPACE>`。
 
-## 6. 出错处理
+只有这一步通过，才可以汇报完整首次配置成功。
+
+## 7. 持续维护与恢复
+
+ChatX 是长期运行的本机桥接器，Agent 不应该只会“第一次安装”，还应能够在之后继续维护。
+
+### Quick 地址变化
+
+症状通常发生在电脑重启或 Tunnel 重建之后。
+
+先运行：
+
+```bash
+chatx doctor -w <WORKSPACE> --json
+```
+
+如果当前公网地址已经变化：
+
+1. 获取新的 `mcpUrl`
+2. 只修复当前 Workspace 的 ChatGPT Connector
+3. 如需要重新配对，生成新的 `pairingCode`
+4. 再做一次端到端只读验证
+
+不要修改其他 Workspace 的 Connector。
+
+### 配对码过期
+
+直接：
+
+```bash
+chatx pair -w <WORKSPACE> --json
+```
+
+然后继续原来的 OAuth / 配对步骤。
+
+### Bridge / Tunnel 异常
+
+优先：
+
+```bash
+chatx doctor -w <WORKSPACE> --json
+```
+
+必要时：
+
+```bash
+chatx restart -w <WORKSPACE> --tunnel
+```
+
+之后再次运行 `doctor` 和端到端验证。
+
+### Named 固定域名需要重新登录 Cloudflare
+
+让用户只完成 Cloudflare 登录 / 域名授权这一动作，完成后继续运行诊断。
+
+固定域名本身没变化时，不要因为授权失效就无理由重建 ChatGPT Connector。
+
+### ChatGPT Connector 丢失 / 失效
+
+重新获取当前 Workspace 的真实 `connectorName` 和 `mcpUrl`，只修复当前 Workspace 对应的 Connector，然后重新端到端验证。
+
+### 外部权限变化
+
+如果 ChatGPT 账号后来失去自定义 MCP 能力，明确报告为外部权限变化，不要重装本机 ChatX。
+
+## 8. 出错处理
 
 第一选择：
 
@@ -239,12 +441,17 @@ Codex 场景下，如本文件与 `skill/SKILL.md` 对 Codex 专属行为存在�
 
 ## 完成后如何向用户汇报
 
-保持简短，只需要说明：
+保持简短，但必须区分层级：
 
-- ChatX 是否已安装
-- 当前连接的 Workspace
-- Bridge / 安全连接是否正常
-- ChatGPT Connector 是否已经完成
-- 如果还有一步必须由用户完成，只给出那一步
+```text
+ChatX: READY / BLOCKED
+Workspace: <name>
+Bridge: READY / BLOCKED
+Public connection: READY / BLOCKED
+ChatGPT Connector: READY / BLOCKED / NEEDS USER ACTION
+End-to-end: VERIFIED / NOT VERIFIED
+```
+
+如果还有一步必须由用户完成，只给出那一步。
 
 不要向普通用户倾倒端口、内部 token、PKCE、状态文件路径或长篇协议细节，除非用户正在主动排障或询问实现原理。

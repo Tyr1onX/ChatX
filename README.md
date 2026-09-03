@@ -36,23 +36,81 @@ ChatX（运行在你的电脑上）
 
 ChatX 不是远程桌面，也不会默认接管你平时使用的 Chrome。
 
+## 使用前需要准备什么？
+
+一个全新的用户要真正把 ChatX 用起来，需要同时满足 **本机环境** 和 **外部账号 / 连接条件**。
+
+### 必须有
+
+1. **一台可以运行 ChatX 的电脑**
+   - Node.js 20+
+   - 可以安装 `cloudflared`
+   - 有一个你愿意让 ChatGPT 操作的本地项目目录
+
+2. **一个能够使用自定义 MCP Connector 的 ChatGPT 账号 / Workspace**
+   - 需要能进入 Developer Mode / 自定义 Connector 相关入口
+   - 如果你的 ChatGPT 当前没有这项产品能力，ChatX 本机装好也无法完成最后连接
+
+3. **能够登录 ChatGPT**
+   - 首次连接时需要在 ChatGPT 中创建当前项目对应的 Connector，并完成 OAuth / 配对
+   - 登录、验证码、2FA、明确授权确认等步骤通常需要你本人完成
+
+### Cloudflare 域名不是必须的
+
+ChatX 有两种常用公网连接方式：
+
+**A. 临时地址（默认，最容易开始）**
+
+- 不需要 Cloudflare 账号
+- 不需要自己的域名
+- ChatX 可以直接建立临时公网地址
+- 缺点是电脑重启或 Tunnel 重建后地址可能变化，此时 ChatGPT 里的 Connector 需要更新 / 重新建立
+
+**B. 固定域名（可选，长期使用更方便）**
+
+如果你已经有：
+
+- Cloudflare 账号
+- 一个已经托管到 Cloudflare 的域名
+
+ChatX 可以给当前 Workspace 配一个固定子域名。首次配置时需要登录一次 Cloudflare 并授权对应域名。
+
+优点是地址稳定，电脑重启后通常不需要重新改 ChatGPT Connector。
+
+> 所以：**没有 Cloudflare 账号或域名也完全可以用 ChatX。** 固定域名只是为了降低后续维护成本。
+
+实验性的 OpenAI Secure MCP Tunnel 也已经有支持，但是否可用取决于对应 ChatGPT / OpenAI 账号能力，目前不作为普通用户默认路径。
+
 ## 安装
 
 ### 推荐：让 AI Agent 帮你装
 
-如果你已经在使用 Codex、Claude Code、Cursor Agent 或其他能够操作本机终端的 AI Agent，推荐直接让它完成安装。
+如果你已经在使用 Codex、Claude Code、Cursor Agent 或其他能够操作本机终端的 AI Agent，推荐直接让它完成安装和后续连接准备。
+
+重要的是：**让 Agent 不只“把软件装上”，而是一直跟到 ChatGPT Connector 和端到端验证完成。**
 
 #### 用 Codex
 
-把下面这段话发给 Codex 就可以：
+把下面这段话发给 Codex：
 
 ```text
-请帮我把 ChatX 安装到本机，并为我当前正在工作的项目配置好：
+请帮我把 ChatX 安装到本机，并为我当前正在工作的项目完整配置好：
 https://github.com/Tyr1onX/ChatX
 
 先阅读仓库里的 skill/SKILL.md，并按其中的 first-time setup 完成。
-能自动完成的步骤都直接完成；只有登录、验证码、2FA 或必须由我确认的授权再叫我操作。
-完成后运行 chatx doctor，并确认当前 Workspace 和连接都正常。
+不要只完成本机软件安装；还要检查 ChatGPT 自定义 MCP Connector 能力、连接地址选择、Connector/OAuth 配对和最终端到端验证。
+
+如果我没有 Cloudflare 账号或域名，就使用临时地址；如果我已经有托管在 Cloudflare 的域名，可以询问我是否使用固定域名。
+
+能自动完成的步骤都直接完成。只有登录、验证码、2FA、Cloudflare/ChatGPT 授权或必须由我确认的页面操作再叫我做，而且每次只告诉我当前必须完成的一步。
+我完成后继续接着配置，不要把任务停在“请自行完成后续配置”。
+
+完成后运行 chatx doctor，并确认：
+1. 当前 Workspace 正确；
+2. Bridge / 公网连接正常；
+3. ChatGPT Connector 已连接；
+4. ChatGPT 能真实读取当前 Workspace 的文件。
+
 不要为了安装 ChatX 修改我项目的业务代码。
 ```
 
@@ -63,19 +121,24 @@ ChatX 已经为 Codex 提供专门的 `skill/SKILL.md`，里面包含安装、�
 把下面这段话交给能够执行本机命令的 Agent：
 
 ```text
-请帮我在这台电脑上安装并配置 ChatX：
+请帮我在这台电脑上完整安装并配置 ChatX：
 https://github.com/Tyr1onX/ChatX
 
 目标是让 ChatGPT 能安全访问我当前正在工作的项目目录。
-请先阅读仓库里的 docs/agent-setup.md，并按其中的首次安装流程完成。
+请先阅读仓库里的 docs/agent-setup.md，并按其中流程完成。
+
+不要把“npm 安装成功”当作完成。你还需要检查外部条件：
+- ChatGPT 是否支持自定义 MCP Connector / Developer Mode；
+- 当前使用临时地址还是 Cloudflare 固定域名；
+- ChatGPT Connector / OAuth / 配对是否完成；
+- 最后是否通过真实只读端到端验证。
 
 能自动完成的步骤直接完成，不要让我手动复制命令。
-只有遇到登录、验证码、2FA 或明确的授权确认时再让我操作。
-完成后运行 chatx doctor，并确认当前 Workspace 和连接都正常。
+只有遇到登录、验证码、2FA 或明确授权时再让我操作，而且每次只给我当前必须完成的一步；我完成后继续接着配置。
 不要修改当前项目的业务代码来完成安装。
 ```
 
-如果 Agent 能操作 ChatGPT 的 Connector 设置，它可以继续把连接也配置好；如果不能，只需要让它告诉你最后一个必须由你完成的步骤。
+如果 Agent 能可靠操作 ChatGPT 的 Connector 设置，它可以继续把连接也配置好；如果不能，它应该明确告诉你唯一需要手工完成的当前步骤，并在你完成后继续验证，而不是提前宣布安装结束。
 
 完整的 Agent 执行规范见 [docs/agent-setup.md](docs/agent-setup.md)。
 
@@ -119,21 +182,35 @@ cd /path/to/your/project
 chatx setup
 ```
 
-ChatX 会启动本机 Bridge，并输出连接地址和配对信息。
+ChatX 会启动本机 Bridge，并让你选择临时地址或固定域名，然后输出当前 Workspace 的连接地址和配对信息。
 
-#### 4. 连接 ChatGPT
+如果选择固定域名，需要按提示登录 Cloudflare 并授权你的域名；如果选择临时地址，不需要 Cloudflare 账号。
 
-在 ChatGPT 的自定义 Connector / Developer Mode 中添加 `chatx setup` 输出的地址，并完成 OAuth 配对。
+#### 4. 在 ChatGPT 添加当前 Workspace 的 Connector
 
-连接后可以先测试：
+你仍然需要让 ChatGPT 知道应该连接到哪里：
+
+1. 确认 ChatGPT 已开放 Developer Mode / 自定义 MCP Connector
+2. 新建当前 Workspace 对应的 Connector
+3. Server URL 使用 `chatx setup` 输出的 MCP 地址
+4. Authentication 使用 OAuth
+5. 按授权页面提示输入 ChatX 的一次性配对码
+
+如果配对码过期，可以运行：
+
+```bash
+chatx pair
+```
+
+连接后先测试一个只读任务：
 
 ```text
 列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
 ```
 
-如果 ChatGPT 能看到你本机项目的真实文件，说明完整链路已经工作。
+如果 ChatGPT 能看到你本机项目的真实文件，才说明 **本机 ChatX → 公网连接 → ChatGPT Connector → 当前 Workspace** 的完整链路真的配置完成。
 
-## 日常使用
+## 日常使用与后续维护
 
 安装完成后，通常不需要再操作 ChatX。直接和 ChatGPT 说你要做什么即可。
 
@@ -142,6 +219,14 @@ ChatX 会启动本机 Bridge，并输出连接地址和配对信息。
 ```bash
 chatx doctor
 ```
+
+常见的后续情况：
+
+- **临时地址变化**：让你的 Agent 运行 `chatx doctor`，并继续修复 / 更新当前 Workspace 的 ChatGPT Connector
+- **配对码过期**：`chatx pair`
+- **Bridge / Tunnel 异常**：优先 `chatx doctor`，必要时 `chatx restart`
+- **固定域名需要重新授权 Cloudflare**：Agent 应只让你完成登录 / 授权，然后继续后面的验证
+- **ChatGPT 账号没有 Connector 权限**：这是外部产品权限问题，不能靠重装 ChatX 解决
 
 常用命令：
 
