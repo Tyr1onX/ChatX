@@ -1,144 +1,109 @@
 # ChatX
 
-**A local capability bridge for ChatGPT.** ChatX runs on your computer and exposes a bounded set of workspace, Git, process, and dedicated-browser capabilities through MCP.
+**A local capability bridge for ChatGPT.** ChatX runs on your computer and lets ChatGPT work with an authorized local workspace, Git, local processes, and a dedicated browser through MCP.
 
-> **Alpha:** `v0.1.0-alpha.2` is intended for technical testers. Cloudflare transport is the production-tested path. OpenAI Secure MCP Tunnel support is implemented and locally verified, but availability of the ChatGPT-side Tunnel connection UI depends on the account/workspace.
+> **Latest public release:** `v0.1.0-alpha.1`  
+> `main` is now the `v0.1.0-alpha.2` candidate and contains the first macOS support pass. Until that prerelease is published, macOS testers should use the source-install path in [docs/macos-smoke.md](docs/macos-smoke.md).
 
-> **ChatGPT access:** installing ChatX does not itself enable custom MCP in ChatGPT. Connector / Developer Mode / Tunnel availability depends on the ChatGPT plan, workspace policy, and current OpenAI product rollout. Cloudflare can provide the network path, but the ChatGPT account still needs permission to add/use the connector.
-
-[中文文档](README.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
+[中文](README.md) · [AI Agent setup](docs/agent-setup.md) · [Troubleshooting](docs/troubleshooting.md) · [Security](docs/security.md)
 
 ## Platform status
 
 | Platform | Status |
 | --- | --- |
 | Windows | Verified in real use and CI |
-| macOS | Code paths and CI verified; real Mac + ChatGPT end-to-end community smoke still requested |
+| macOS | Source verified on GitHub macOS Node 20/22 CI, including a real dedicated-browser launch smoke; real Mac + ChatGPT end-to-end community smoke still requested |
 | Linux | Core CI verified; real desktop end-to-end coverage is still limited |
 
-macOS uses the same npm package as Windows. Dedicated-browser discovery supports Google Chrome, Microsoft Edge, Chromium, and Chrome Canary in standard macOS application locations. Set `CHATX_BROWSER_BIN` when the browser executable is installed elsewhere.
-
-Real Mac testers can follow [docs/macos-smoke.md](docs/macos-smoke.md).
+macOS uses the same ChatX codebase as Windows. Browser discovery supports Google Chrome, Microsoft Edge, Chromium, and Chrome Canary in standard macOS locations. Use `CHATX_BROWSER_BIN` for a non-standard executable path.
 
 ## What ChatX does
 
 ```text
-ChatGPT / MCP client
-        |
-        | MCP over an authenticated transport
-        v
-      ChatX                <- local Node.js process, loopback only
-  +-----+------+-----+
-  |            |     |
-Workspace     Git  Dedicated browser
-read/write         Playwright
-  |
-Process runner
-(shell:false, bounded output/timeout)
-        |
-        v
-     Your OS
+ChatGPT
+   ↓
+authenticated connection
+   ↓
+ChatX on your computer
+   ↓
+Workspace / Git / Process / Dedicated browser
 ```
 
-Current MCP capabilities include workspace inspection/search/read, Git status/diff, execution summaries, workspace file writes, local process execution, and navigation/snapshot/click/type in a dedicated Playwright browser profile.
+Typical tasks include inspecting project files, reviewing Git state, applying requested workspace changes, running local commands, reading logs, and validating pages in ChatX's separate browser profile.
 
-Direct-control capabilities are separated into OAuth scopes:
+## Before you start
 
-- `workspace.write` — write files inside the workspace boundary.
-- `process.run` — run local executables. **This is host-level code execution under your OS account and is intentionally high privilege.**
-- `browser.control` — control ChatX's dedicated browser profile.
-- `workspace.control` — legacy broad scope retained only for upgrade compatibility.
+A complete ChatX setup requires:
 
-## Transports
+1. Node.js 20+, `cloudflared`, and a local project workspace.
+2. A ChatGPT account/workspace with custom MCP Connector / Developer Mode access.
+3. One-time Connector setup and pairing for the target workspace.
 
-ChatX's core is transport-neutral:
+A Cloudflare account or custom domain is **not required**. Quick Tunnel is the simplest default. A Cloudflare-managed domain is optional when you want a stable address.
 
-- **Cloudflare Quick / Named Tunnel** — current default and end-to-end tested with ChatGPT. ChatX OAuth + one-time pairing protects the public MCP endpoint.
-- **OpenAI Secure MCP Tunnel (experimental)** — `tunnel-client` connects outbound to OpenAI and forwards to ChatX on loopback. ChatX supports the official managed runtime, Windows proxy injection, and tunnel health/readiness checks. No public ChatX URL is created.
-- **Local** — loopback-only development/testing.
+## Recommended: let your AI Agent configure ChatX
 
-## Install from source
+If you use Codex, Claude Code, Cursor Agent, or another local terminal-capable agent, give it the repository and ask it to continue through the actual ChatGPT Connector and end-to-end workspace verification rather than stopping after package installation.
 
-Requirements: Node.js 20+, Git. Cloudflare mode also needs `cloudflared`.
+- Codex: read `skill/SKILL.md`
+- Other agents: read `docs/agent-setup.md`
+
+## Manual install
+
+Windows dependencies:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS
+winget install --id Cloudflare.cloudflared
+```
+
+macOS dependencies:
 
 ```bash
-git clone https://github.com/Tyr1onX/ChatX.git
-cd ChatX
-corepack pnpm install
-corepack pnpm build
-node bin/c2c.js --version
+brew install node cloudflared
 ```
 
-The primary CLI name is `chatx`. `c2c` is retained as a compatibility alias. When installed from the packaged release artifact, both names are created automatically.
-
-For a local checkout you can link it globally:
+Latest public release:
 
 ```bash
-npm link
-chatx --version
+npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
 ```
 
-Then, for a workspace:
+Then, inside the target project:
 
 ```bash
-chatx setup -w /path/to/project
-chatx status -w /path/to/project
-chatx doctor -w /path/to/project
+chatx setup
 ```
 
-The bundled Codex skill is under `skill/SKILL.md` for users who want Codex to automate setup and connection maintenance.
+Add the MCP address produced by `chatx setup` to the matching ChatGPT Connector and complete pairing. A final read-only check should confirm ChatGPT can see the real target workspace.
 
-## Release package
+> macOS testers should not use `alpha.1` to judge the new browser support. Follow [docs/macos-smoke.md](docs/macos-smoke.md) and test current `main` until the next prerelease is public.
 
-Every tagged alpha release is gated by tests, typecheck, build, production dependency audit, and a **clean tarball install smoke test**. The GitHub Release workflow publishes a `.tgz` plus `SHA256SUMS.txt`.
-
-The package is intentionally allow-listed: runtime `dist/`, CLI entry, docs, skill, examples, README and license are included; `src/` and `tests/` are excluded. This prevents the old failure mode where a packed install had no `dist/` and crashed looking for the development-only `tsx` dependency.
-
-## Security model
-
-ChatX is powerful by design. The security boundary is explicit rather than implied:
-
-- Bridge HTTP binds only to loopback.
-- Cloudflare/public MCP requests require OAuth; access/refresh tokens are scoped to one workspace.
-- OpenAI Tunnel mode keeps the target on loopback and relies on the tunnel's remote access policy; ChatX still enforces workspace/sensitive-file/process/browser policy locally.
-- Workspace paths are canonicalized; traversal and symlink escapes are blocked.
-- Sensitive files such as `.env`, SSH/private keys, cloud credentials and `.npmrc` are denied by default.
-- `.chatxignore` can add project-specific exclusions; `.c2cignore` remains supported.
-- `write_file` is workspace-bounded and size-limited.
-- `run_command` uses an executable + argument array with `shell:false`, output limits and timeouts, **but the executable itself can access host resources allowed to the current OS user**.
-- The dedicated browser uses a separate profile; ChatX does not automatically attach to your normal Chrome profile.
-- Long-lived keys are not committed or printed by ChatX. OpenAI tunnel runtime keys are referenced through environment variables.
-
-Read the complete threat model before enabling direct-control scopes: [docs/security.md](docs/security.md).
-
-## Compatibility
-
-This alpha deliberately preserves existing installations:
-
-- `c2c` remains a CLI alias.
-- Existing `workspace.control` tokens remain accepted for the new narrower control capabilities.
-- Existing saved connector names are not rewritten.
-- The legacy `codex-with-chatgpt` OS state directory is reused so existing OAuth tokens, tunnel metadata, sessions and logs continue to resolve.
-- New environment variables use `CHATX_*`, while existing `C2C_*` variables remain accepted.
-
-## Development
+## Maintenance
 
 ```bash
-corepack pnpm test
-corepack pnpm typecheck
-corepack pnpm build
-corepack pnpm audit --prod
-corepack pnpm release:smoke
+chatx status
+chatx doctor
+chatx pair
+chatx logs
+chatx stop
 ```
 
-CI runs on Windows, macOS, and Ubuntu with Node.js 20 and 22.
+Use `chatx doctor` first when the connection needs repair.
 
-## Project status
+## Security
 
-`v0.1.0-alpha.2` adds the first macOS support pass, macOS CI, platform-aware browser discovery, and a real-device compatibility smoke path while keeping Windows behavior and the existing transport/security model intact.
+ChatX has strong local capabilities. Only connect trusted AI clients and only expose workspaces you intend to authorize. Local processes run with the permissions of the current OS account; ChatX is not a full host sandbox.
+
+See [docs/security.md](docs/security.md) for the complete boundary.
+
+## More documentation
+
+- [AI Agent setup](docs/agent-setup.md)
+- [macOS Compatibility Smoke](docs/macos-smoke.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Security](docs/security.md)
+- [Architecture](docs/architecture.md)
+- [Protocol](docs/protocol.md)
 
 **Unofficial community project. Not affiliated with or endorsed by OpenAI or Cloudflare.**
-
-## Upstream and license
-
-ChatX evolved from [XiaoDuoYa/codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt). The original Git history and MIT license are retained. See [LICENSE](LICENSE).

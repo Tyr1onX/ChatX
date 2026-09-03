@@ -1,22 +1,23 @@
 # Changelog
 
-## v0.1.0-alpha.2 — 2026-09-03
+## Unreleased — v0.1.0-alpha.2 candidate
 
-macOS testing alpha and onboarding improvements.
+macOS testing alpha and onboarding improvements. The source version is prepared as `0.1.0-alpha.2`, but the public prerelease has not been published yet.
 
 ### Added
 
 - macOS browser discovery for Google Chrome, Microsoft Edge, Chromium, and Chrome Canary.
 - `CHATX_BROWSER_BIN` override for non-standard browser executable locations.
 - macOS GitHub Actions coverage on Node.js 20 and 22.
-- Real-device macOS compatibility smoke checklist covering install, Bridge, Cloudflare, ChatGPT Connector/OAuth, Workspace, Git, process execution, browser control, and doctor.
+- macOS CI browser smoke that actually launches the ChatX dedicated browser and validates a page.
+- Real-device macOS compatibility smoke checklist covering install, Bridge, Cloudflare, ChatGPT Connector, Workspace, Git, process execution, browser control, and doctor.
 - Chinese-first README onboarding with Agent-first setup instructions and explicit external ChatGPT/Cloudflare prerequisites.
 
 ### Changed
 
 - Browser discovery is now platform-aware across Windows, macOS, and common Linux desktop paths.
-- README now distinguishes automatically verified platform support from real-device end-to-end verification.
-- AI Agent guidance now treats ChatGPT Connector and end-to-end Workspace access as part of completion, not just local package installation.
+- README distinguishes automated platform verification from real-device end-to-end verification.
+- AI Agent guidance treats ChatGPT Connector and end-to-end Workspace access as part of completion, not just local package installation.
 
 ### Security
 
