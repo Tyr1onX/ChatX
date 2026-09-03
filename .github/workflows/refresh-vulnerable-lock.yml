@@ -25,6 +25,8 @@ jobs:
         run: corepack pnpm install --frozen-lockfile
       - name: Apply production audit fix
         run: corepack pnpm audit --prod --fix
+      - name: Apply overrides and refresh lockfile
+        run: corepack pnpm install --no-frozen-lockfile
       - name: Verify production audit
         run: corepack pnpm audit --prod
       - name: Remove one-off workflow
