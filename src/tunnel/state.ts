@@ -21,12 +21,12 @@ export function tunnelStateFile(workspaceId: string): string {
 }
 
 export function readTunnelState(workspaceId: string): TunnelState {
-  return (
-    readJsonIfExists<TunnelState>(tunnelStateFile(workspaceId)) ?? {
-      workspaceId,
-      preference: "unset",
-    }
-  );
+  const state = readJsonIfExists<TunnelState>(tunnelStateFile(workspaceId));
+  if (!state) return { workspaceId, preference: "unset" };
+  if (state.preference !== "unset" && state.preference !== "quick" && state.preference !== "named") {
+    return { workspaceId, preference: "unset" };
+  }
+  return state;
 }
 
 export function writeTunnelState(state: TunnelState): TunnelState {
