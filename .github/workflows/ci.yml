@@ -33,6 +33,26 @@ jobs:
         run: corepack pnpm typecheck
       - name: Build
         run: corepack pnpm build
+      - name: macOS browser smoke
+        if: runner.os == 'macOS'
+        env:
+          CHATX_STATE_DIR: ${{ runner.temp }}/chatx-browser-smoke
+        run: |
+          node --input-type=module <<'NODE'
+          import { BrowserController } from "./dist/browser/controller.js";
+
+          const browser = new BrowserController();
+          try {
+            await browser.start(true);
+            const result = await browser.navigate("data:text/html,<title>ChatX macOS smoke</title><h1>ok</h1>");
+            if (result.title !== "ChatX macOS smoke") {
+              throw new Error(`unexpected browser title: ${result.title}`);
+            }
+            console.log("macOS browser smoke ok");
+          } finally {
+            await browser.close();
+          }
+          NODE
       - name: Production dependency audit
         run: corepack pnpm audit --prod
       - name: Release package smoke
