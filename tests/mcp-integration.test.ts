@@ -80,10 +80,13 @@ describe("MCP tools over Streamable HTTP", () => {
       "browser_navigate",
       "browser_snapshot",
       "browser_type",
+      "create_directory",
+      "delete_path",
       "execution_summary",
       "git_diff",
       "git_status",
       "list_directory",
+      "move_path",
       "process_list",
       "process_read",
       "process_start",
@@ -163,6 +166,37 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(textOf(conflict)).toContain("PATCH_CONFLICT");
   });
 
+  it("creates moves and deletes workspace paths over MCP", async () => {
+    const created = await client.callTool({
+      name: "create_directory",
+      arguments: { path: "generated/nested" },
+    });
+    expect(created.isError ?? false).toBe(false);
+    expect(fs.statSync(path.join(root, "generated/nested")).isDirectory()).toBe(true);
+
+    write(root, "generated/nested/source.txt", "move-me\n");
+    const moved = await client.callTool({
+      name: "move_path",
+      arguments: { source: "generated/nested/source.txt", destination: "archive/result.txt" },
+    });
+    expect(moved.isError ?? false).toBe(false);
+    expect(fs.readFileSync(path.join(root, "archive/result.txt"), "utf8")).toBe("move-me\n");
+
+    const refused = await client.callTool({
+      name: "delete_path",
+      arguments: { path: "archive" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain("DIRECTORY_NOT_EMPTY");
+
+    const deleted = await client.callTool({
+      name: "delete_path",
+      arguments: { path: "archive", recursive: true },
+    });
+    expect(deleted.isError ?? false).toBe(false);
+    expect(fs.existsSync(path.join(root, "archive"))).toBe(false);
+  });
+
   it("writes a workspace file and runs a local executable", async () => {
     const written = await client.callTool({
       name: "write_file",
@@ -203,6 +237,21 @@ describe("MCP tools over Streamable HTTP", () => {
         arguments: { edits: [{ path: "writer-only.txt", old_text: "ok", new_text: "patched" }] },
       });
       expect(patchResult.isError ?? false).toBe(false);
+      const mkdirResult = await writer.callTool({
+        name: "create_directory",
+        arguments: { path: "writer-dir" },
+      });
+      expect(mkdirResult.isError ?? false).toBe(false);
+      const moveResult = await writer.callTool({
+        name: "move_path",
+        arguments: { source: "writer-only.txt", destination: "writer-dir/moved.txt" },
+      });
+      expect(moveResult.isError ?? false).toBe(false);
+      const deleteResult = await writer.callTool({
+        name: "delete_path",
+        arguments: { path: "writer-dir", recursive: true },
+      });
+      expect(deleteResult.isError ?? false).toBe(false);
       const deniedRun = await writer.callTool({
         name: "run_command",
         arguments: { command: process.execPath, args: ["-e", "process.stdout.write('no')"] },
@@ -237,6 +286,12 @@ describe("MCP tools over Streamable HTTP", () => {
       });
       expect(deniedPatch.isError).toBe(true);
       expect(textOf(deniedPatch)).toContain("workspace.write");
+      const deniedDelete = await runner.callTool({
+        name: "delete_path",
+        arguments: { path: "src/index.ts" },
+      });
+      expect(deniedDelete.isError).toBe(true);
+      expect(textOf(deniedDelete)).toContain("workspace.write");
     } finally {
       await runner.close();
     }
@@ -359,6 +414,12 @@ describe("MCP tools over Streamable HTTP", () => {
     });
     expect(controlDenied.isError).toBe(true);
     expect(textOf(controlDenied)).toContain("INSUFFICIENT_SCOPE");
+    const mutationDenied = await limitedClient.callTool({
+      name: "create_directory",
+      arguments: { path: "limited-should-not-create" },
+    });
+    expect(mutationDenied.isError).toBe(true);
+    expect(textOf(mutationDenied)).toContain("INSUFFICIENT_SCOPE");
     await limitedClient.close();
   });
 
