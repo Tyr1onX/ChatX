@@ -11,6 +11,7 @@ import {
 } from "../workspace/mutate.js";
 import { searchWorkspace } from "../workspace/search.js";
 import { gitDiff, gitInfo, gitStatus, type DiffMode } from "../workspace/git.js";
+import { gitLog, gitShow, GitHistoryError } from "../workspace/git-history.js";
 import { latestExecutionRecord, readExecutionRecords } from "../execution/records.js";
 import type { Logger } from "../logger/index.js";
 import { PRODUCT_NAME, VERSION } from "../version.js";
@@ -48,6 +49,7 @@ function mapError(error: unknown): ToolResult {
     error instanceof WorkspaceError ||
     error instanceof WorkspacePatchError ||
     error instanceof WorkspaceMutationError ||
+    error instanceof GitHistoryError ||
     error instanceof ProcessSessionError
   ) {
     return fail(error.code, error.message);
@@ -614,6 +616,61 @@ export function createMcpServer(ctx: McpContext): McpServer {
             relPath
           )
         );
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "git_log",
+    {
+      title: "Git commit history",
+      description:
+        `Return structured commit history for the workspace or one workspace-relative path. ` +
+        `Supports skip/limit pagination and an optional branch, tag, or commit ref. ${UNTRUSTED_NOTE}`,
+      inputSchema: {
+        ref: z.string().min(1).default("HEAD").describe("Branch, tag, or commit ref"),
+        path: z.string().optional().describe("Limit history to one workspace-relative path"),
+        limit: z.number().int().min(1).max(100).default(20),
+        skip: z.number().int().min(0).default(0),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireScope(extra.authInfo, "git.read");
+      if (denied) return denied;
+      try {
+        const relPath = args.path ? workspace.resolve(args.path).rel : undefined;
+        return ok(gitLog(workspace, { ref: args.ref, limit: args.limit, skip: args.skip }, relPath));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "git_show",
+    {
+      title: "Show Git commit",
+      description:
+        `Show structured metadata, safe changed paths, and a paginated patch for one commit. ` +
+        `Merge commits are compared with their first parent. Sensitive files and rename provenance ` +
+        `are excluded before patch generation. ${UNTRUSTED_NOTE}`,
+      inputSchema: {
+        ref: z.string().min(1).default("HEAD").describe("Branch, tag, or commit ref"),
+        path: z.string().optional().describe("Limit changed paths and patch to one workspace-relative path"),
+        offset: z.number().int().min(0).default(0).describe("Byte offset for patch pagination"),
+        max_bytes: z.number().int().min(1024).max(262144).default(65536),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireScope(extra.authInfo, "git.read");
+      if (denied) return denied;
+      try {
+        const relPath = args.path ? workspace.resolve(args.path).rel : undefined;
+        return ok(gitShow(workspace, { ref: args.ref, offset: args.offset, maxBytes: args.max_bytes }, relPath));
       } catch (error) {
         return mapError(error);
       }
