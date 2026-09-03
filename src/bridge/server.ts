@@ -35,12 +35,9 @@ export interface BridgeOptions {
   port?: number;
   host?: string;
   logger?: Logger;
-  tunnelProvider?: TunnelProvider;
-  /** Persist runtime state file (disable in tests). */
   persistRuntime?: boolean;
   authStoreFile?: string;
   pairingTtlMs?: number;
-  accessTokenTtlMs?: number;
 }
 
 export interface Bridge {
@@ -51,14 +48,10 @@ export interface Bridge {
   authStore: AuthStore;
   pairing: PairingManager;
   tunnel: TunnelProvider;
-  getPublicBaseUrl(): string | null;
   localBaseUrl(): string;
   close(): Promise<void>;
 }
 
-/**
- * Listen on the preferred port; on EADDRINUSE fall back to an ephemeral port.
- */
 function listen(app: express.Express, host: string, preferredPort: number): Promise<{ server: Server; port: number }> {
   return new Promise((resolve, reject) => {
     const tryListen = (port: number, allowFallback: boolean): void => {
@@ -90,7 +83,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
   const authStore = new AuthStore(workspace.id, { file: opts.authStoreFile });
   const pairing = new PairingManager(workspace.id, { ttlMs: opts.pairingTtlMs });
-  const tunnel = opts.tunnelProvider ?? tunnelForWorkspace(workspace.id, logger);
+  const tunnel = tunnelForWorkspace(workspace.id, logger);
   const browser = new BrowserController();
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
 
@@ -107,13 +100,9 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     return `${proto}://${hostHeader}`;
   };
 
-  // ---- Health (public but minimal) ---------------------------------------
-
   app.get("/health", (_req, res) => {
     res.json({ service: SERVICE_NAME, version: VERSION, workspaceId: workspace.id, status: "ok" });
   });
-
-  // ---- OAuth + discovery ---------------------------------------------------
 
   app.use(
     createOAuthRouter({
@@ -125,8 +114,6 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     })
   );
 
-  // ---- MCP endpoint (bearer-protected) --------------------------------------
-
   const mcpHandler = createMcpHttpHandler(() => createMcpServer({ workspace, logger, browser }), logger);
   app.all(
     "/mcp",
@@ -137,17 +124,14 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     }
   );
 
-  // ---- Admin API (loopback + admin token only; used by the CLI/Skill) --------
-
   const adminGuard = (req: Request, res: Response, next: NextFunction): void => {
-    // Defense in depth: reject anything that arrived through a proxy/tunnel.
     const remote = req.socket.remoteAddress ?? "";
     const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
     const viaProxy = Boolean(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"]);
     const header = req.headers.authorization ?? "";
     const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
     if (!isLoopback || viaProxy || token !== adminToken) {
-      res.status(404).end(); // do not advertise the admin surface
+      res.status(404).end();
       return;
     }
     next();
@@ -252,7 +236,6 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     authStore,
     pairing,
     tunnel,
-    getPublicBaseUrl: () => publicBaseUrl,
     localBaseUrl: () => `http://${host}:${port}`,
     close: shutdown,
   };
