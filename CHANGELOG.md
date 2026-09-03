@@ -11,12 +11,13 @@ macOS testing alpha and onboarding improvements. The source version is prepared 
 - macOS GitHub Actions coverage on Node.js 20 and 22.
 - macOS CI browser smoke that actually launches the ChatX dedicated browser and validates a page.
 - Real-device macOS compatibility smoke checklist covering install, Bridge, Cloudflare, ChatGPT Connector, Workspace, Git, process execution, browser control, and doctor.
+- First successful community real-Mac installation and ChatGPT connection result.
 - Chinese-first README onboarding with Agent-first setup instructions and explicit external ChatGPT/Cloudflare prerequisites.
 
 ### Changed
 
 - Browser discovery is now platform-aware across Windows, macOS, and common Linux desktop paths.
-- README distinguishes automated platform verification from real-device end-to-end verification.
+- README now records real Windows and macOS ChatGPT end-to-end installation validation instead of treating macOS as CI-only.
 - AI Agent guidance treats ChatGPT Connector and end-to-end Workspace access as part of completion, not just local package installation.
 
 ### Security
