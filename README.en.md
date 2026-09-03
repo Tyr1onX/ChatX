@@ -47,7 +47,7 @@ Only ask me to act when a login, authorization, OAuth step, CAPTCHA/2FA, or expl
 
 For ChatGPT, use only the verified path:
 Settings → Plugins → New plugin → Server URL → paste the URL produced by ChatX → Authentication: OAuth → create and finish authorization/pairing.
-Do not send me to Developer Mode and do not infer an alternative MCP setup path from my plan.
+Keep ChatGPT on this path; do not infer another setup flow from the account plan or unrelated settings pages.
 
 Finish only after ChatGPT can read the real current workspace.
 Do not modify project business code just to install ChatX.
@@ -76,7 +76,7 @@ Settings
 → finish authorization / pairing
 ```
 
-Do not use Developer Mode as a prerequisite and do not look for a separate setup route under Advanced Settings or Security.
+That is the complete ChatGPT-side setup flow.
 
 Then verify with a read-only request such as:
 

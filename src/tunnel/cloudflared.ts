@@ -3,21 +3,14 @@ import readline from "node:readline";
 import type { Logger } from "../logger/index.js";
 import { nullLogger } from "../logger/index.js";
 import { findBinary } from "./detect.js";
-import type { TunnelDoctorReport, TunnelProvider, TunnelStatus } from "./provider.js";
+import type { TunnelProvider, TunnelStatus } from "./provider.js";
 
 const QUICK_TUNNEL_URL_RE = /https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com/i;
 
-/** Extract a Quick Tunnel public URL from a cloudflared log line. */
 export function parseQuickTunnelUrl(line: string): string | null {
-  const match = line.match(QUICK_TUNNEL_URL_RE);
-  return match ? match[0] : null;
+  return line.match(QUICK_TUNNEL_URL_RE)?.[0] ?? null;
 }
 
-/**
- * Cloudflare Quick Tunnel provider.
- * Quick Tunnels need no account/login; the URL changes on every start,
- * which the bridge and the Skill handle by reconfiguring automatically.
- */
 export class CloudflaredQuickTunnel implements TunnelProvider {
   readonly name = "cloudflare-quick";
   private child: ChildProcess | null = null;
@@ -37,10 +30,9 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
     if (this.child && this.url) return this.url;
     const bin = this.binary();
     if (!bin) {
-      throw new Error(
-        "cloudflared is not installed. Install it (e.g. `brew install cloudflared`) and retry."
-      );
+      throw new Error("cloudflared is not installed. Install it (e.g. `brew install cloudflared`) and retry.");
     }
+
     return new Promise<string>((resolve, reject) => {
       const child = spawn(
         bin,
@@ -52,11 +44,10 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
       this.lastError = null;
 
       const timeout = setTimeout(() => {
-        if (!this.url) {
-          this.logger.error("Quick tunnel did not produce a URL within 45s");
-          child.kill("SIGTERM");
-          reject(new Error("Tunnel start timed out"));
-        }
+        if (this.url) return;
+        this.logger.error("Quick tunnel did not produce a URL within 45s");
+        child.kill("SIGTERM");
+        reject(new Error("Tunnel start timed out"));
       }, 45_000);
 
       const scan = (stream: NodeJS.ReadableStream): void => {
@@ -90,7 +81,13 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
         this.child = null;
         this.url = null;
         if (wasStarting) {
-          reject(new Error(`cloudflared exited (code ${code}) before establishing a tunnel${this.lastError ? `: ${this.lastError}` : ""}`));
+          reject(
+            new Error(
+              `cloudflared exited (code ${code}) before establishing a tunnel${
+                this.lastError ? `: ${this.lastError}` : ""
+              }`
+            )
+          );
         }
       });
     });
@@ -104,37 +101,12 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
     this.url = null;
   }
 
-  async restart(localPort: number): Promise<string> {
-    await this.stop();
-    return this.start(localPort);
-  }
-
   status(): TunnelStatus {
     return {
       running: this.child !== null && this.url !== null,
       url: this.url,
       provider: this.name,
       detail: this.lastError ?? undefined,
-    };
-  }
-
-  getPublicUrl(): string | null {
-    return this.url;
-  }
-
-  async doctor(): Promise<TunnelDoctorReport> {
-    const bin = this.binary();
-    const problems: string[] = [];
-    if (!bin) problems.push("cloudflared binary not found");
-    if (bin && !this.child) problems.push("tunnel process not running");
-    if (this.child && !this.url) problems.push("tunnel running but no public URL yet");
-    return {
-      provider: this.name,
-      binaryFound: bin !== null,
-      binaryPath: bin,
-      running: this.child !== null,
-      url: this.url,
-      problems,
     };
   }
 }

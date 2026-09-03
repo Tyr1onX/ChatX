@@ -19,7 +19,7 @@ ChatX 本机配置
 → 端到端验证
 ```
 
-**不要引导用户寻找 Developer Mode，不要根据 Plus / Pro / Business / Enterprise / Edu 猜测另一套 MCP 路线，也不要把未实际验证的 ChatGPT 接入方式作为安装备选。**
+**首次安装只执行以上路线。不要根据账号套餐或其他设置页面推断替代接入方式。**
 
 ## Agent 的职责
 
@@ -194,7 +194,7 @@ ChatGPT
 4. 需要 ChatX 配对码时，使用当前 `pairingCode`。
 5. 显示已连接 / 授权成功后继续。
 
-**不要先去设置 Developer Mode。不要把 Developer Mode 当作前置条件。不要引导用户在 Advanced Settings、Security 或套餐说明中寻找另一套入口。**
+**只使用上述「新插件 → 服务器 URL → OAuth」入口。当前界面没有这个入口时，记录实际界面并提交兼容性反馈，不要自行切换到其他接入方式。**
 
 如果 Agent 能可靠操作这个页面，可以直接完成表单与跳转；如果不能，只让用户做这一件事：
 

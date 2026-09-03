@@ -2,7 +2,7 @@
 
 ## Unreleased — v0.1.0-alpha.2 candidate
 
-macOS testing alpha and onboarding improvements. The source version is prepared as `0.1.0-alpha.2`, but the public prerelease has not been published yet.
+macOS testing alpha, onboarding improvements, and connection-architecture cleanup. The source version is prepared as `0.1.0-alpha.2`, but the public prerelease has not been published yet.
 
 ### Added
 
@@ -19,9 +19,18 @@ macOS testing alpha and onboarding improvements. The source version is prepared 
 - Browser discovery is now platform-aware across Windows, macOS, and common Linux desktop paths.
 - README now records real Windows and macOS ChatGPT end-to-end installation validation instead of treating macOS as CI-only.
 - AI Agent guidance treats ChatGPT Connector and end-to-end Workspace access as part of completion, not just local package installation.
+- Remote connection architecture now has one supported path: Cloudflare Quick/Named → Server URL → ChatX OAuth → MCP.
+- `TunnelProvider`, Bridge, CLI, Doctor, and tunnel state no longer carry a second private-tunnel identity model.
+
+### Removed
+
+- Experimental OpenAI Secure MCP Tunnel runtime and `tunnel-client` integration.
+- Tunnel-ID based setup/status/doctor branches and their dedicated tests/documentation.
+- Developer Mode URL from ChatX runtime setup metadata. Developer Mode remains explicitly unsupported as an onboarding prerequisite.
 
 ### Security
 
+- Every remote `/mcp` path now uses the same ChatX OAuth bearer authorization boundary.
 - Override the transitive `qs` dependency to `>=6.16.0` to pick up the patched release required by the production dependency audit.
 
 ## v0.1.0-alpha.1 — 2026-09-02
@@ -33,9 +42,8 @@ First ChatX public alpha preparation.
 - ChatX product branding and `chatx` CLI, with `c2c` compatibility alias.
 - Direct local capabilities: workspace writes, local process execution, and dedicated-browser control.
 - Narrow capability scopes: `workspace.write`, `process.run`, and `browser.control`.
-- Cloudflare Quick/Named and transport-neutral tunnel abstraction.
-- Experimental OpenAI Secure MCP Tunnel provider using the official managed `tunnel-client` runtime.
-- Windows-specific OpenAI tunnel proxy support and non-blocking runtime supervision.
+- Cloudflare Quick/Named support.
+- An experimental OpenAI Secure MCP Tunnel prototype, later removed from the alpha.2 candidate in favor of the verified Server URL + OAuth path.
 - `.chatxignore` with `.c2cignore` compatibility.
 - Windows/Ubuntu CI on Node.js 20 and 22.
 - Deterministic npm package allow-list and clean-install release smoke test.
@@ -52,7 +60,6 @@ First ChatX public alpha preparation.
 
 - Replaced the obsolete claim that ChatGPT has no write/exec capability.
 - Explicitly documents that `process.run` is host-level execution under the current OS user and is not a filesystem/OS sandbox.
-- Documents transport-specific identity boundaries for Cloudflare and OpenAI Tunnel modes.
 
 ### Verification
 

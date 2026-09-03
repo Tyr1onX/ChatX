@@ -2,44 +2,40 @@
 
 ## Overview
 
-ChatX is a local capability bridge. The model/client sends structured MCP calls; a loopback-only Node.js process performs the actual local work and returns structured results.
+ChatX is a local capability bridge. ChatGPT sends structured MCP calls; a loopback-only Node.js process performs the actual local work and returns structured results.
 
 ```text
-                   Remote AI client
-                  (ChatGPT / MCP)
-                         |
-                  selected transport
-                         |
-          +--------------+--------------+
-          |                             |
- Cloudflare Quick/Named        OpenAI Secure MCP Tunnel
- public HTTPS endpoint             tunnel-client sidecar
- ChatX OAuth + pairing             outbound HTTPS only
-          |                             |
-          +--------------+--------------+
-                         |
-                   127.0.0.1:<port>
-                         |
-                      ChatX
-      +------------------+------------------+
-      |                  |                  |
-  Workspace/Git       Process runner     Browser controller
-  read/search/write   child_process      Playwright profile
-      |                  |                  |
-      +------------------+------------------+
-                         |
-                       Host OS
+                    ChatGPT
+                       |
+              Server URL + OAuth
+                       |
+            Cloudflare Quick/Named
+                public HTTPS
+                       |
+                127.0.0.1:<port>
+                       |
+                    ChatX
+      +----------------+----------------+
+      |                |                |
+ Workspace/Git     Process runner   Browser controller
+ read/search/write child_process    Playwright profile
+      |                |                |
+      +----------------+----------------+
+                       |
+                     Host OS
 ```
+
+There is one supported remote connection model: Cloudflare provides HTTPS reachability, while ChatX OAuth authorizes access to `/mcp`.
 
 ## Core modules
 
 | Area | Responsibility |
 | --- | --- |
-| `src/bridge/` | Express loopback server, runtime state, admin API, transport lifecycle |
+| `src/bridge/` | Express loopback server, runtime state, admin API, Cloudflare lifecycle |
 | `src/mcp/` | MCP Streamable HTTP endpoint and tool registration |
-| `src/auth/` | Cloudflare/public-mode OAuth 2.1, PKCE, pairing, token storage |
+| `src/auth/` | OAuth 2.1, PKCE, pairing, token storage |
 | `src/workspace/` | Workspace identity, path containment, sensitive-file rules, search and Git |
-| `src/tunnel/` | Vendor-neutral provider interface; Cloudflare and OpenAI implementations |
+| `src/tunnel/` | Cloudflare Quick/Named connection providers |
 | `src/browser/` | Dedicated Playwright browser controller |
 | `src/process/` | Background bridge lifecycle |
 | `src/execution/` | Execution summaries used for review/status workflows |
@@ -49,12 +45,32 @@ ChatX is a local capability bridge. The model/client sends structured MCP calls;
 
 The bridge refuses non-loopback bind addresses. Its local HTTP surface includes:
 
-- `/mcp` — Streamable HTTP MCP endpoint
+- `/mcp` — Streamable HTTP MCP endpoint, always bearer-protected
 - `/health` — minimal health response
-- OAuth discovery/authorization/token endpoints in Cloudflare/public mode
+- OAuth discovery/authorization/token endpoints
 - `/admin/*` — loopback + random admin-token protected CLI control surface
 
 The bridge is one-workspace-per-instance. Workspace IDs are stable hashes derived by the workspace manager and are used to separate token/state records.
+
+## Connection lifecycle
+
+A workspace chooses one Cloudflare mode:
+
+- **Quick** — no account/domain required; public URL may change after restart.
+- **Named** — stable hostname under the user's Cloudflare-managed domain.
+
+Both providers implement the same small contract: start the connection for a local port and return one public HTTPS base URL. The rest of ChatX never needs a second remote identity model or a transport-specific opaque ID.
+
+ChatGPT setup then follows one path:
+
+```text
+Plugins
+→ New plugin
+→ Server URL
+→ <ChatX public /mcp URL>
+→ OAuth
+→ pairing / authorization
+```
 
 ## MCP capability layers
 
@@ -101,27 +117,9 @@ ChatX caps stdout/stderr and enforces a timeout. The process is not an OS sandbo
 
 The controller does not automatically attach to the user's normal Chrome/Edge profile.
 
-## Transport abstraction
-
-`TunnelProvider` no longer assumes every transport yields a public URL.
-
-### Cloudflare
-
-Cloudflare Quick and Named providers return a public HTTPS base URL. ChatX uses its own OAuth server and one-time pairing flow to authorize the remote client.
-
-### OpenAI Secure MCP Tunnel
-
-The OpenAI provider returns an opaque `tunnel_id`, not a public ChatX URL. It supervises the official `tunnel-client` managed runtime using asynchronous child-process calls and verifies runtime state using `runtimes status`.
-
-Runtime API keys are referenced as `env:NAME`; ChatX does not persist the key. An optional HTTP(S) proxy may be injected into only the tunnel-client child process. This is required on systems where browser proxy settings do not apply to command-line programs.
-
-### Local
-
-Local mode uses only the loopback MCP endpoint for development/testing.
-
 ## State and compatibility
 
-The external brand is ChatX, but `v0.1.0-alpha.1` intentionally preserves several legacy identifiers so existing users are not disconnected:
+The external brand is ChatX, but the current alpha line intentionally preserves several identifiers so existing working installations are not disconnected:
 
 - default OS state directory remains `codex-with-chatgpt`
 - `c2c` CLI alias remains installed
@@ -130,7 +128,7 @@ The external brand is ChatX, but `v0.1.0-alpha.1` intentionally preserves severa
 - `C2C_*` environment variables remain fallbacks for new `CHATX_*` variables
 - `.c2cignore` remains supported alongside `.chatxignore`
 
-A future stable release can migrate these identifiers only with explicit, tested state migration.
+These are compatibility details, not parallel product paths. A future migration should remove them only with an explicit, tested state migration.
 
 ## Release architecture
 
@@ -146,4 +144,4 @@ source tree
   -> GitHub Release .tgz + SHA256SUMS.txt
 ```
 
-CI runs Windows and Ubuntu on Node 20 and 22. Tagged release creation is blocked unless the package-install smoke passes.
+The release gate runs tests, typecheck, build, dependency audit, and packaged-install smoke before a tagged release is published.

@@ -10,7 +10,13 @@ import {
   provisionNamedTunnel,
   type CloudflaredAccount,
 } from "../src/tunnel/named-provision.js";
-import { isNamedTunnelReady, needsTunnelChoice, readTunnelState } from "../src/tunnel/state.js";
+import {
+  isNamedTunnelReady,
+  needsTunnelChoice,
+  readTunnelState,
+  writeTunnelState,
+  type TunnelState,
+} from "../src/tunnel/state.js";
 import { cleanup, isolateStateDir } from "./helpers.js";
 
 const stateDirs: string[] = [];
@@ -99,6 +105,12 @@ describe("tunnel preference state", () => {
     expect(saved.preference).toBe("quick");
     expect(needsTunnelChoice(readTunnelState("ws1"))).toBe(false);
     expect(isNamedTunnelReady(saved)).toBe(false);
+  });
+
+  it("treats an unsupported persisted preference as unset", () => {
+    stateDirs.push(isolateStateDir());
+    writeTunnelState({ workspaceId: "legacy", preference: "removed-mode" } as unknown as TunnelState);
+    expect(readTunnelState("legacy")).toEqual({ workspaceId: "legacy", preference: "unset" });
   });
 
   it("provisions a named hostname through the account adapter and stores it outside the project", () => {

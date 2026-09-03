@@ -3,7 +3,7 @@ import readline from "node:readline";
 import type { Logger } from "../logger/index.js";
 import { nullLogger } from "../logger/index.js";
 import { findBinary } from "./detect.js";
-import type { TunnelDoctorReport, TunnelProvider, TunnelStatus } from "./provider.js";
+import type { TunnelProvider, TunnelStatus } from "./provider.js";
 
 const CONNECTED_RE = /registered tunnel connection/i;
 const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -24,13 +24,6 @@ export function normalizeNamedTunnelHostname(hostname: string): string {
   return normalized;
 }
 
-/**
- * Locally-managed Cloudflare named tunnel.
- *
- * The tunnel object and its DNS route are provisioned once with cloudflared.
- * This provider only starts and monitors the connector process, so the public
- * URL remains stable across bridge restarts.
- */
 export class CloudflaredNamedTunnel implements TunnelProvider {
   readonly name = "cloudflare-named";
   private readonly tunnelName: string;
@@ -66,9 +59,7 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
     if (this.child && this.connected) return this.publicUrl();
     const bin = this.binary();
     if (!bin) {
-      throw new Error(
-        "cloudflared is not installed. Install it (e.g. `brew install cloudflared`) and retry."
-      );
+      throw new Error("cloudflared is not installed. Install it (e.g. `brew install cloudflared`) and retry.");
     }
 
     return new Promise<string>((resolve, reject) => {
@@ -96,11 +87,10 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
         fn();
       };
       const timeout = setTimeout(() => {
-        if (!this.connected) {
-          this.lastError = "Named tunnel start timed out";
-          child.kill("SIGTERM");
-          finish(() => reject(new Error(this.lastError ?? "Named tunnel start timed out")));
-        }
+        if (this.connected) return;
+        this.lastError = "Named tunnel start timed out";
+        child.kill("SIGTERM");
+        finish(() => reject(new Error(this.lastError ?? "Named tunnel start timed out")));
       }, this.startTimeoutMs);
 
       const scan = (stream: NodeJS.ReadableStream): void => {
@@ -154,37 +144,12 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
     this.connected = false;
   }
 
-  async restart(localPort: number): Promise<string> {
-    await this.stop();
-    return this.start(localPort);
-  }
-
   status(): TunnelStatus {
     return {
       running: this.child !== null && this.connected,
       url: this.connected ? this.publicUrl() : null,
       provider: this.name,
       detail: this.lastError ?? undefined,
-    };
-  }
-
-  getPublicUrl(): string | null {
-    return this.connected ? this.publicUrl() : null;
-  }
-
-  async doctor(): Promise<TunnelDoctorReport> {
-    const bin = this.binary();
-    const problems: string[] = [];
-    if (!bin) problems.push("cloudflared binary not found");
-    if (bin && !this.child) problems.push("named tunnel process not running");
-    if (this.child && !this.connected) problems.push("named tunnel is not connected yet");
-    return {
-      provider: this.name,
-      binaryFound: bin !== null,
-      binaryPath: bin,
-      running: this.child !== null && this.connected,
-      url: this.connected ? this.publicUrl() : null,
-      problems,
     };
   }
 }
