@@ -8,7 +8,7 @@ ChatX 是一个运行在你电脑上的本地桥接器。连接完成后，ChatG
 
 [English](README.en.md) · [AI Agent 安装说明](docs/agent-setup.md) · [排障](docs/troubleshooting.md) · [安全说明](docs/security.md)
 
-> 当前版本：`v0.1.0-alpha.1`。ChatX 仍处于 Alpha 阶段。
+> 当前版本：`v0.1.0-alpha.2`。ChatX 仍处于 Alpha 阶段。
 >
 > ChatX 不会绕过 ChatGPT 本身的产品权限。如果你的账号 / 工作区没有自定义 MCP Connector、Developer Mode 或对应 Tunnel 能力，本机安装成功后 ChatGPT 仍可能无法连接。
 
@@ -180,7 +180,7 @@ brew install node cloudflared
 #### 2. 安装 ChatX
 
 ```bash
-npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
+npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.2/chatx-local-bridge-0.1.0-alpha.2.tgz
 ```
 
 确认：
