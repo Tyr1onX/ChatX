@@ -18,31 +18,36 @@ export function browserExecutableCandidates(
   const home = env.HOME?.trim() || os.homedir();
   const candidates: string[] = [];
 
-  if (explicit) candidates.push(path.resolve(explicit));
+  if (explicit) {
+    const resolver = platform === "win32" ? path.win32 : path.posix;
+    candidates.push(resolver.resolve(explicit));
+  }
 
   if (platform === "win32") {
+    const join = path.win32.join;
     const programFiles = env.PROGRAMFILES?.trim() || "C:\\Program Files";
     const programFilesX86 = env["PROGRAMFILES(X86)"]?.trim() || "C:\\Program Files (x86)";
     const localAppData = env.LOCALAPPDATA?.trim();
     candidates.push(
-      path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
-      path.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
-      path.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
+      join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+      join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
+      join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
     );
     if (localAppData) {
       candidates.push(
-        path.join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe")
+        join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+        join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe")
       );
     }
   } else if (platform === "darwin") {
-    const appRoots = ["/Applications", path.join(home, "Applications")];
+    const join = path.posix.join;
+    const appRoots = ["/Applications", join(home, "Applications")];
     for (const root of appRoots) {
       candidates.push(
-        path.join(root, "Google Chrome.app", "Contents", "MacOS", "Google Chrome"),
-        path.join(root, "Microsoft Edge.app", "Contents", "MacOS", "Microsoft Edge"),
-        path.join(root, "Chromium.app", "Contents", "MacOS", "Chromium"),
-        path.join(root, "Google Chrome Canary.app", "Contents", "MacOS", "Google Chrome Canary")
+        join(root, "Google Chrome.app", "Contents", "MacOS", "Google Chrome"),
+        join(root, "Microsoft Edge.app", "Contents", "MacOS", "Microsoft Edge"),
+        join(root, "Chromium.app", "Contents", "MacOS", "Chromium"),
+        join(root, "Google Chrome Canary.app", "Contents", "MacOS", "Google Chrome Canary")
       );
     }
   } else {
