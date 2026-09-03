@@ -61,7 +61,7 @@ export async function readWorkspaceFiles(
       const originalContentBytes = Buffer.byteLength(result.content, "utf8");
       const content = truncateUtf8(result.content, allowedBytes);
       const contentBytes = Buffer.byteLength(content, "utf8");
-      const batchTruncated = contentBytes < originalContentBytes;
+      const batchTruncated = result.byteTruncated || contentBytes < originalContentBytes;
       totalContentBytes += contentBytes;
       truncated ||= result.truncated || batchTruncated;
       files.push({

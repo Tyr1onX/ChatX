@@ -147,6 +147,7 @@ describe("read_file pagination", () => {
     expect(result.totalLines).toBe(1000);
     expect(result.endLine).toBe(400);
     expect(result.truncated).toBe(true);
+    expect(result.byteTruncated).toBe(false);
     expect(result.remainingLines).toBe(600);
     expect(result.nextStartLine).toBe(401);
   });
@@ -156,6 +157,30 @@ describe("read_file pagination", () => {
     expect(result.content).toBe("line 500\nline 501\nline 502");
     expect(result.startLine).toBe(500);
     expect(result.endLine).toBe(502);
+    expect(result.byteTruncated).toBe(false);
+  });
+
+  it("stops before the next whole line when the byte budget is reached", async () => {
+    const content = Array.from({ length: 6 }, (_, i) => `${i + 1}:${"x".repeat(995)}`).join("\n");
+    write(root, "byte-lines.txt", content);
+    const result = await ws.readFile("byte-lines.txt", { endLine: 6, maxBytes: 2500 });
+    expect(result.endLine).toBe(2);
+    expect(result.byteTruncated).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.nextStartLine).toBe(3);
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(2500);
+  });
+
+  it("hard-caps an oversized first line with a UTF-8 safe prefix", async () => {
+    write(root, "oversized-line.txt", "🙂".repeat(100_000));
+    const result = await ws.readFile("oversized-line.txt", { maxBytes: 4096 });
+    expect(result.endLine).toBe(1);
+    expect(result.byteTruncated).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.remainingLines).toBe(0);
+    expect(result.nextStartLine).toBeNull();
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(4096);
+    expect(result.content.endsWith("�")).toBe(false);
   });
 
   it("denies binary files", async () => {

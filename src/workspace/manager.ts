@@ -35,6 +35,7 @@ export interface ReadFileResult {
   startLine: number;
   endLine: number;
   truncated: boolean;
+  byteTruncated: boolean;
   remainingLines: number;
   nextStartLine: number | null;
   content: string;
@@ -63,6 +64,14 @@ export interface ProjectConfig {
 const DEFAULT_MAX_LINES = 400;
 const HARD_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 256 * 1024;
+
+function truncateUtf8Prefix(text: string, maxBytes: number): string {
+  const buffer = Buffer.from(text, "utf8");
+  if (buffer.length <= maxBytes) return text;
+  let end = maxBytes;
+  while (end > 0 && (buffer[end] & 0xc0) === 0x80) end--;
+  return buffer.subarray(0, end).toString("utf8");
+}
 
 export class Workspace {
   readonly root: string;
@@ -211,8 +220,14 @@ export class Workspace {
       totalLines++;
       if (totalLines >= startLine && totalLines <= endLimit && !byteTruncated) {
         const cost = Buffer.byteLength(line, "utf8") + 1;
-        if (collectedBytes + cost > maxBytes && lines.length > 0) {
+        if (collectedBytes + cost > maxBytes) {
           byteTruncated = true;
+          if (lines.length === 0) {
+            const prefix = truncateUtf8Prefix(line, maxBytes);
+            lines.push(prefix);
+            collectedBytes = Buffer.byteLength(prefix, "utf8");
+            actualEnd = totalLines;
+          }
         } else {
           lines.push(line);
           collectedBytes += cost;
@@ -229,7 +244,8 @@ export class Workspace {
       totalLines,
       startLine: Math.min(startLine, Math.max(totalLines, 1)),
       endLine: actualEnd,
-      truncated: remaining > 0,
+      truncated: byteTruncated || remaining > 0,
+      byteTruncated,
       remainingLines: remaining,
       nextStartLine: remaining > 0 ? actualEnd + 1 : null,
       content: lines.join("\n"),
