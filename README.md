@@ -61,7 +61,7 @@ https://github.com/Tyr1onX/ChatX
 
 ChatGPT 端只使用已经验证过的路线：
 设置 → 插件 → 新插件 → 服务器 URL → 粘贴 ChatX 输出的 URL → 身份验证选择 OAuth → 创建并完成授权/配对。
-不要引导我寻找 Developer Mode，也不要根据套餐猜测另一套 MCP 接入路径。
+ChatGPT 端固定使用这条路线，不根据套餐或其他设置页面推断替代接入方式。
 
 最后确认 ChatGPT 能真实读取当前 Workspace。
 不要修改项目业务代码来完成 ChatX 安装。
@@ -76,7 +76,6 @@ https://github.com/Tyr1onX/ChatX
 先阅读 docs/agent-setup.md，并持续执行到 ChatGPT 能真实读取当前 Workspace 为止。
 能自动完成的步骤全部自己完成；只在登录、授权、OAuth 或必须由我本人确认时让我操作。
 ChatGPT 端只走「设置 → 插件 → 新插件 → 服务器 URL → OAuth」这条已经验证过的路线。
-不要引导我寻找 Developer Mode。
 ```
 
 完整 Agent 执行规范见 [docs/agent-setup.md](docs/agent-setup.md)。
@@ -102,7 +101,7 @@ ChatGPT 中固定使用：
 → 完成授权 / 配对
 ```
 
-不需要先开启 Developer Mode，也不需要到 Advanced Settings / Security 中寻找其他入口。
+首次配置只需要按以上步骤完成。
 
 最后在 ChatGPT 中测试：
 
