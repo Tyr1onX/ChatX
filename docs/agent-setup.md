@@ -2,36 +2,58 @@
 
 这份文档给能够操作用户本机终端的 AI Agent 使用。
 
-目标不是“把 ChatX 装上”，而是把下面四层连续完成：
+目标只有一个：
 
-1. **Local** — ChatX 安装完成，Workspace 正确，Bridge 正常
-2. **Transport** — 当前 Workspace 有可用公网连接
-3. **ChatGPT** — 当前 Workspace 的自定义 MCP Connector 已完成连接和配对
-4. **End-to-end** — ChatGPT 能通过该 Connector 真实读取目标 Workspace
+> 让 ChatGPT 通过 ChatX 真实访问当前本地 Workspace。
 
-只完成 `npm install`、`chatx setup` 或本机诊断，都不能汇报“完整配置成功”。
+首次安装只采用已经实际跑通的 ChatGPT 接入路线：
+
+```text
+ChatX 本机配置
+→ Cloudflare 公网连接
+→ 得到 MCP Server URL
+→ ChatGPT「设置 → 插件 → 新插件」
+→ 服务器 URL
+→ OAuth
+→ 完成授权 / 配对
+→ 端到端验证
+```
+
+**不要引导用户寻找 Developer Mode，不要根据 Plus / Pro / Business / Enterprise / Edu 猜测另一套 MCP 路线，也不要把未实际验证的 ChatGPT 接入方式作为安装备选。**
+
+## Agent 的职责
+
+本机能够自动完成的事情全部由 Agent 完成，不要把命令逐条甩给用户。
+
+Agent 应自行完成：
+
+- 检查 Node.js 20+
+- 安装 / 更新 ChatX
+- 确定目标 Workspace
+- 安装 / 检查 `cloudflared`
+- 启动 ChatX Bridge
+- 配置 Cloudflare 连接
+- 运行 `chatx setup`
+- 获取当前 Workspace 的 MCP Server URL 和配对信息
+- 运行 `chatx status` / `chatx doctor`
+- 最终端到端验证
+
+只有确实必须由用户本人完成时才请求操作，例如：
+
+- Cloudflare 登录 / 授权
+- CAPTCHA / 2FA
+- ChatGPT 页面上的明确授权确认
+- Agent 无法可靠操作 ChatGPT「新插件」页面时，让用户粘贴一次 URL 并完成 OAuth
+
+每次只让用户完成当前这一步；完成后 Agent 继续接管原任务。
 
 不要为了安装 ChatX 修改用户项目的业务代码。
-
-## 用户交互原则
-
-能自动完成的步骤直接完成。
-
-只在确实需要用户本人参与时请求操作，例如：
-
-- ChatGPT / Cloudflare 登录
-- CAPTCHA / 2FA
-- 明确的第三方授权确认
-- Agent 无法可靠操作 ChatGPT Connector 页面
-- 用户需要在临时地址和已有固定域名之间做选择
-
-每次只让用户完成当前一步；用户完成后继续原任务，不要把后续流程甩回给用户。
 
 ## 0. 确定 Workspace
 
 目标 Workspace 是用户希望 ChatGPT 操作的项目目录，不是 ChatX 仓库。
 
-如果 Agent 当前就在目标项目中工作，可以使用当前目录。后续命令优先显式传入：
+后续命令优先显式传入：
 
 ```bash
 -w <WORKSPACE>
@@ -45,13 +67,13 @@ ChatX 需要 Node.js 20+：
 node --version
 ```
 
-默认 Cloudflare 路径还需要：
+默认 Cloudflare 路线需要：
 
 ```bash
 cloudflared --version
 ```
 
-缺失时自行安装：
+缺失时由 Agent 自行安装。
 
 Windows：
 
@@ -65,13 +87,13 @@ macOS：
 brew install cloudflared
 ```
 
-macOS 独立浏览器支持 Google Chrome、Microsoft Edge、Chromium 和 Chrome Canary。非标准安装位置可以通过 `CHATX_BROWSER_BIN` 指定。
+不要让用户手动执行这些安装命令，除非当前 Agent 没有执行权限。
 
-## 2. 判断应该安装哪个版本
+## 2. 安装 ChatX
 
 ### 普通用户
 
-当前最新公开 Release 是：
+当前最新公开 Release：
 
 ```text
 v0.1.0-alpha.1
@@ -83,42 +105,13 @@ v0.1.0-alpha.1
 npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
 ```
 
+如果机器已经安装 ChatX，先检查版本和运行状态，不要无条件重装。
+
 ### macOS Compatibility Smoke
 
-`main` 已经包含第一版 macOS 支持，源码版本为：
+在 `v0.1.0-alpha.2` prerelease 正式发布前，Mac 测试者按 `docs/macos-smoke.md` 从 `main` 源码安装。
 
-```text
-0.1.0-alpha.2
-```
-
-在 `v0.1.0-alpha.2` prerelease 正式发布前，Mac 测试者应从 `main` 源码安装，而不是使用旧的 `alpha.1` 判断 macOS 浏览器兼容性：
-
-```bash
-git clone https://github.com/Tyr1onX/ChatX.git
-cd ChatX
-corepack pnpm install
-corepack pnpm build
-npm link
-chatx --version
-```
-
-如果机器已经安装 ChatX，不要无条件重装；先确认版本和当前运行状态。
-
-## 3. 检查外部条件
-
-在继续之前确认用户的 ChatGPT 账号 / Workspace 能使用自定义 MCP Connector / Developer Mode。
-
-如果账号没有这项能力：
-
-```text
-Local ChatX: 可以继续准备
-ChatGPT Connector: BLOCKED BY ACCOUNT / WORKSPACE CAPABILITY
-End-to-end: NOT VERIFIED
-```
-
-不要把这个外部权限问题误诊断成本机安装失败。
-
-## 4. 选择公网连接
+## 3. 配置 Cloudflare 连接
 
 先检查当前 Workspace：
 
@@ -126,43 +119,43 @@ End-to-end: NOT VERIFIED
 chatx tunnel status -w <WORKSPACE> --json
 ```
 
-如果已有有效选择，不要无理由更改。
+如果已有有效配置，继续使用，不要重建。
 
-### Quick / 临时地址
+### 默认：临时地址
 
-没有 Cloudflare 账号或域名时直接使用：
+没有现成固定域名需求时，直接使用 Quick：
 
 ```bash
 chatx tunnel choose -w <WORKSPACE> --mode quick --json
 ```
 
-Quick 不要求用户先注册 Cloudflare 或购买域名。
+Quick 不要求用户购买域名，也不要求用户理解 Tunnel、DNS 或端口。
 
-### Named / 固定域名
+### 用户明确希望固定域名
 
-只有用户已经有托管在 Cloudflare 的域名并希望固定地址时使用：
+只有用户已经有托管在 Cloudflare 的域名并明确希望固定地址时使用 Named：
 
 ```bash
 chatx tunnel choose -w <WORKSPACE> --mode named --zone <DOMAIN> --json
 ```
 
-如果需要 Cloudflare 登录或授权，让用户完成当前页面动作，然后继续流程。
+需要 Cloudflare 登录 / 授权时，只让用户完成当前浏览器页面，然后 Agent 继续执行。
 
-Named 配置失败并提供 Quick fallback 时，优先让用户先可用，不要反复阻塞在固定域名上。
+Named 配置失败且 ChatX 提供 Quick fallback 时，优先先恢复可用状态，不要反复阻塞用户。
 
-## 5. 首次配置
+## 4. 运行首次配置
 
 ```bash
 chatx setup -w <WORKSPACE> --json
 ```
 
-确认输出中的：
+确认：
 
-- Workspace 身份正确
-- Bridge 已启动
-- 当前公网连接正常
-- MCP 地址对应当前 Workspace
-- 有可用于首次配对的信息
+- Workspace 正确
+- Bridge 正常
+- Cloudflare 公网连接正常
+- 输出了当前 Workspace 的 `mcpUrl`
+- 输出了当前可用的配对信息
 
 如果配对信息失效：
 
@@ -170,28 +163,58 @@ chatx setup -w <WORKSPACE> --json
 chatx pair -w <WORKSPACE> --json
 ```
 
-## 6. 配置 ChatGPT Connector
+此时本机侧已经完成。接下来只需要把 `mcpUrl` 添加到 ChatGPT。
 
-如果 Agent 能可靠操作 ChatGPT 页面，则继续完成：
+## 5. ChatGPT：只走「新插件 → 服务器 URL → OAuth」
 
-1. 确认 Developer Mode / 自定义 MCP Connector 可用
-2. 为当前 Workspace 创建或修复它自己的 Connector
-3. 使用 `chatx setup` 当前输出的 MCP 地址
-4. 按 ChatX 的配对流程完成连接
-5. 不要修改其他 Workspace 的 Connector
+首次安装固定使用已经验证过的入口：
 
-如果 Agent 不能操作 ChatGPT UI，只让用户完成当前唯一必须的页面动作；用户完成后继续第 7 节验证。
+```text
+ChatGPT
+→ 设置
+→ 插件
+→ 新插件
+```
 
-## 7. 必须做端到端验证
+在「新插件」页面填写：
 
-本机先运行：
+```text
+名称：<connectorName，通常为 ChatX · <workspace>>
+描述：Securely connect ChatGPT to the current Codex workspace for planning and review.
+连接：服务器 URL
+服务器 URL：<chatx setup 输出的 mcpUrl>
+身份验证：OAuth
+```
+
+然后：
+
+1. 勾选页面上的自定义 MCP 风险确认。
+2. 点击「创建」。
+3. 按页面进入 OAuth 授权。
+4. 需要 ChatX 配对码时，使用当前 `pairingCode`。
+5. 显示已连接 / 授权成功后继续。
+
+**不要先去设置 Developer Mode。不要把 Developer Mode 当作前置条件。不要引导用户在 Advanced Settings、Security 或套餐说明中寻找另一套入口。**
+
+如果 Agent 能可靠操作这个页面，可以直接完成表单与跳转；如果不能，只让用户做这一件事：
+
+```text
+请在 ChatGPT「设置 → 插件 → 新插件」中，选择「服务器 URL」，
+粘贴我给你的 URL，身份验证选 OAuth，然后完成创建和授权。
+```
+
+不要再让用户处理任何本机命令。
+
+## 6. 必须做端到端验证
+
+先检查本机：
 
 ```bash
 chatx status -w <WORKSPACE> --json
 chatx doctor -w <WORKSPACE> --json
 ```
 
-然后让 ChatGPT 执行只读验证：
+然后在已经连接 ChatX 插件的 ChatGPT 对话中执行：
 
 ```text
 列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
@@ -199,17 +222,26 @@ chatx doctor -w <WORKSPACE> --json
 
 确认结果确实来自 `<WORKSPACE>`。
 
-只有这一层通过，完整首次配置才算成功。
+只有这一层通过，首次安装才算成功。
 
-## 8. 持续维护
+## 7. 后续维护
 
-### 临时地址变化
+出现问题先运行：
 
 ```bash
 chatx doctor -w <WORKSPACE> --json
 ```
 
-如果公网地址变化，只修复当前 Workspace 的 Connector，再重新做端到端验证。
+### Quick 地址变化
+
+如果公网地址变化：
+
+1. Agent 获取新的 `mcpUrl` 和配对信息。
+2. 只处理当前 Workspace 对应的 ChatGPT 插件。
+3. 删除旧插件并按同一条「新插件 → 服务器 URL → OAuth」路线重新创建。
+4. 再次端到端验证。
+
+不要改动其他 Workspace 的 ChatX 插件。
 
 ### 配对失效
 
@@ -217,41 +249,11 @@ chatx doctor -w <WORKSPACE> --json
 chatx pair -w <WORKSPACE> --json
 ```
 
-然后继续原来的连接步骤。
-
-### Bridge / Tunnel 异常
-
-优先：
-
-```bash
-chatx doctor -w <WORKSPACE> --json
-```
-
-必要时：
-
-```bash
-chatx restart -w <WORKSPACE> --tunnel
-```
-
-修复后再次诊断并做端到端验证。
+然后完成 OAuth / 配对并重新验证。
 
 ### 固定域名需要重新登录
 
-只让用户完成 Cloudflare 登录 / 授权，然后继续诊断。固定地址没有变化时，不要无理由重建 Connector。
-
-### Connector 丢失
-
-重新获取当前 Workspace 的真实连接信息，只恢复当前 Workspace 的 Connector，然后再次验证。
-
-## 9. macOS 社区测试
-
-如果当前机器是 Mac，并且用户是在测试第一版 macOS 支持，还要阅读：
-
-```text
-docs/macos-smoke.md
-```
-
-需要验证 Workspace、Git、本地进程和独立浏览器，而不仅仅是 `chatx setup`。
+只让用户完成 Cloudflare 登录 / 授权。固定地址没有变化时，不要无理由删除并重建 ChatGPT 插件。
 
 ## Codex
 
@@ -261,19 +263,19 @@ docs/macos-smoke.md
 skill/SKILL.md
 ```
 
-Codex 专属工作流以 `skill/SKILL.md` 为准。
+Codex 工作流也必须遵守本文的唯一首次安装路线。
 
 ## 完成后汇报
 
-保持简短，但明确层级：
+保持简短：
 
 ```text
 ChatX: READY / BLOCKED
 Workspace: <name>
 Bridge: READY / BLOCKED
-Public connection: READY / BLOCKED
-ChatGPT Connector: READY / BLOCKED / NEEDS USER ACTION
+Cloudflare: READY / BLOCKED
+ChatGPT 插件: READY / NEEDS USER ACTION
 End-to-end: VERIFIED / NOT VERIFIED
 ```
 
-如果还有一步必须由用户完成，只给出那一步。
+如果还有一步必须由用户本人完成，只给出那一步。
