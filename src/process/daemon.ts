@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 import { ensureDir, getStateDir } from "../config/paths.js";
 import { findLiveBridge, probeBridge, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
 import { Workspace } from "../workspace/manager.js";
+import {
+  consumeTunnelRestoreIntent,
+  forgetRestartConnection,
+  rememberRestartConnection,
+  type RestartConnectionInfo,
+} from "./restart-state.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +29,11 @@ function cliEntry(): { cmd: string; args: string[] } {
 export interface EnsureBridgeResult {
   runtime: RuntimeState;
   spawned: boolean;
+}
+
+async function restoreTunnelAfterRestart(workspaceId: string, runtime: RuntimeState): Promise<void> {
+  if (!consumeTunnelRestoreIntent(workspaceId)) return;
+  await adminFetch(runtime, "POST", "/admin/tunnel/start", 90_000);
 }
 
 /**
@@ -62,7 +73,10 @@ export async function ensureBridge(workspaceRoot: string, opts: { port?: number 
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 300));
     const runtime = await findLiveBridge(workspace.id);
-    if (runtime) return { runtime, spawned: true };
+    if (runtime) {
+      await restoreTunnelAfterRestart(workspace.id, runtime);
+      return { runtime, spawned: true };
+    }
     if (child.exitCode !== null && child.exitCode !== 0) {
       throw new Error(`Bridge process exited with code ${child.exitCode}. See ${logFile}`);
     }
@@ -96,10 +110,17 @@ export async function adminFetch<T = unknown>(
 
 export async function stopBridge(workspaceRoot: string): Promise<boolean> {
   const workspace = new Workspace(workspaceRoot);
+  forgetRestartConnection(workspace.id);
   const runtime = readRuntimeState(workspace.id);
   if (!runtime) return false;
   const healthy = await probeBridge(runtime.port);
   if (healthy && healthy.workspaceId === workspace.id) {
+    try {
+      const info = await adminFetch<RestartConnectionInfo>(runtime, "GET", "/admin/info", 5000);
+      rememberRestartConnection(workspace.id, info);
+    } catch {
+      forgetRestartConnection(workspace.id);
+    }
     try {
       await adminFetch(runtime, "POST", "/admin/shutdown", 5000);
       return true;
@@ -111,6 +132,7 @@ export async function stopBridge(workspaceRoot: string): Promise<boolean> {
     process.kill(runtime.pid, "SIGTERM");
     return true;
   } catch {
+    forgetRestartConnection(workspace.id);
     return false;
   }
 }
