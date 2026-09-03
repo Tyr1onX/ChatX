@@ -72,6 +72,8 @@ export const NOISE_PATTERNS: string[] = [
   "yarn.lock",
 ];
 
+export const CUSTOM_IGNORE_FILENAMES = [".chatxignore", ".c2cignore"] as const;
+
 export class IgnoreRules {
   private sensitive: Ignore;
   private noise: Ignore;
@@ -81,7 +83,7 @@ export class IgnoreRules {
     this.sensitive = ignore().add(SENSITIVE_PATTERNS);
     this.noise = ignore().add(NOISE_PATTERNS);
     this.custom = ignore();
-    for (const fileName of [".chatxignore", ".c2cignore"]) {
+    for (const fileName of CUSTOM_IGNORE_FILENAMES) {
       const customIgnore = path.join(workspaceRoot, fileName);
       try {
         if (fs.existsSync(customIgnore)) {
