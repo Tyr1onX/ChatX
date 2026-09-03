@@ -70,4 +70,25 @@ describe("workspace batch reads", () => {
       cleanup(root);
     }
   });
+
+  it("hard-caps a pathological first line that exceeds the underlying read budget", async () => {
+    const root = makeTmpDir("batch-read-single-line");
+    try {
+      write(root, "single-line.txt", "🙂".repeat(100_000));
+      const workspace = new Workspace(root);
+
+      const result = await readWorkspaceFiles(workspace, [{ path: "single-line.txt" }]);
+      const file = result.files[0];
+      expect(file?.ok).toBe(true);
+      if (file?.ok) {
+        expect(file.batchTruncated).toBe(true);
+        expect(file.truncated).toBe(true);
+        expect(Buffer.byteLength(file.content, "utf8")).toBeLessThanOrEqual(128 * 1024);
+        expect(file.content.endsWith("�")).toBe(false);
+      }
+      expect(result.totalContentBytes).toBeLessThanOrEqual(128 * 1024);
+    } finally {
+      cleanup(root);
+    }
+  });
 });
