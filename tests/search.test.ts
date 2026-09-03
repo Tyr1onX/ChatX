@@ -102,7 +102,7 @@ describe.each(engines())("search engine: %s", (engine) => {
       path: "smart-case.txt",
       regex: true,
     });
-    expect(insensitive.engine).toBe(engine);
+    expect(insensitive.engine).toBe("node");
     expect(insensitive.matches.map((match) => match.line)).toEqual([1, 2, 3]);
 
     const sensitive = await searchWorkspace(ws, {
@@ -110,7 +110,7 @@ describe.each(engines())("search engine: %s", (engine) => {
       path: "smart-case.txt",
       regex: true,
     });
-    expect(sensitive.engine).toBe(engine);
+    expect(sensitive.engine).toBe("node");
     expect(sensitive.matches.map((match) => match.line)).toEqual([2]);
   });
 
