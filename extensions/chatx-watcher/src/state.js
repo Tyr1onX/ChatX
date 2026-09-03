@@ -136,11 +136,23 @@ export function confirmDone(state, runId, metadata, now) {
 }
 
 export function acknowledgeRun(state, conversationId, now) {
-  const run = getCurrentRun(state, conversationId);
-  if (!run || run.state !== RunState.DONE) return { run, acknowledged: false };
-  run.state = RunState.ACKNOWLEDGED;
-  run.acknowledgedAt = now;
-  return { run, acknowledged: true };
+  const pending = state.runs.filter(
+    (run) => run.conversationId === conversationId && run.state === RunState.DONE
+  );
+  if (pending.length === 0) {
+    return { run: getCurrentRun(state, conversationId), acknowledged: false, runIds: [] };
+  }
+
+  for (const run of pending) {
+    run.state = RunState.ACKNOWLEDGED;
+    run.acknowledgedAt = now;
+  }
+  pending.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+  return {
+    run: pending[0],
+    acknowledged: true,
+    runIds: pending.map((run) => run.runId),
+  };
 }
 
 export function cleanupWatcherState(

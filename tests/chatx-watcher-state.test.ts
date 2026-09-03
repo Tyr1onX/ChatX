@@ -136,6 +136,21 @@ describe("ChatX Watcher run state machine", () => {
     expect(state.runs).toHaveLength(2);
   });
 
+  it("acknowledges an older DONE run even after a newer run starts", () => {
+    const state = createEmptyWatcherState();
+    startRun(state, baseMetadata, 1000, "run-1");
+    completeRun(state, "run-1");
+    startRun(state, baseMetadata, 9000, "run-2");
+
+    const ack = acknowledgeRun(state, "conversation-a", 10000);
+    expect(ack.acknowledged).toBe(true);
+    expect(ack.runIds).toEqual(["run-1"]);
+    expect(state.runs.find((run) => run.runId === "run-1")?.state).toBe(
+      RunState.ACKNOWLEDGED
+    );
+    expect(state.runs.find((run) => run.runId === "run-2")?.state).toBe(RunState.RUNNING);
+  });
+
   it("CASE 6: a short streaming pause cannot enter FINISH_CANDIDATE", () => {
     expect(
       canEnterFinishCandidate(doneSignals({ stableForMs: MIN_STABLE_MS - 1 }))
