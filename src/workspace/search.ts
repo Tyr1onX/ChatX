@@ -36,11 +36,14 @@ export interface SearchResult {
   contextAfter?: number;
   contextBytes?: number;
   maxContextBytes?: number;
+  contextSourceBytes?: number;
+  maxContextSourceBytes?: number;
   contextTruncated?: boolean;
 }
 
 const MAX_CONTEXT_LINES = 3;
 const MAX_CONTEXT_BYTES = 128 * 1024;
+const MAX_CONTEXT_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_CONTEXT_LINE_CHARS = 500;
 
 const RG_CANDIDATES = [
@@ -204,6 +207,7 @@ async function attachSearchContext(
 
   const cache = new Map<string, string[] | null>();
   let contextBytes = 0;
+  let contextSourceBytes = 0;
   let contextTruncated = false;
   let budgetExhausted = false;
 
@@ -216,7 +220,14 @@ async function attachSearchContext(
         cache.set(relPath, null);
         return null;
       }
+      if (contextSourceBytes + stat.size > MAX_CONTEXT_SOURCE_BYTES) {
+        contextTruncated = true;
+        budgetExhausted = true;
+        cache.set(relPath, null);
+        return null;
+      }
       const content = await fs.promises.readFile(target.abs, "utf8");
+      contextSourceBytes += stat.size;
       if (content.includes("\0")) {
         cache.set(relPath, null);
         return null;
@@ -274,6 +285,8 @@ async function attachSearchContext(
     contextAfter,
     contextBytes,
     maxContextBytes: MAX_CONTEXT_BYTES,
+    contextSourceBytes,
+    maxContextSourceBytes: MAX_CONTEXT_SOURCE_BYTES,
     contextTruncated,
   };
 }
