@@ -17,6 +17,7 @@ import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
 import { writeRuntimeState, clearRuntimeState, type RuntimeState } from "./runtime.js";
 import { BrowserController } from "../browser/controller.js";
+import { ProcessSessionManager } from "../process/session-manager.js";
 
 function tunnelForWorkspace(workspaceId: string, logger: Logger): TunnelProvider {
   const binding = namedTunnelBinding(readTunnelState(workspaceId));
@@ -85,6 +86,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   const pairing = new PairingManager(workspace.id, { ttlMs: opts.pairingTtlMs });
   const tunnel = tunnelForWorkspace(workspace.id, logger);
   const browser = new BrowserController();
+  const processes = new ProcessSessionManager(workspace);
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
 
   let publicBaseUrl: string | null = null;
@@ -114,7 +116,10 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     })
   );
 
-  const mcpHandler = createMcpHttpHandler(() => createMcpServer({ workspace, logger, browser }), logger);
+  const mcpHandler = createMcpHttpHandler(
+    () => createMcpServer({ workspace, logger, browser, processes }),
+    logger
+  );
   app.all(
     "/mcp",
     express.json({ limit: "8mb" }),
@@ -222,6 +227,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     if (closed) return;
     closed = true;
     await tunnel.stop().catch(() => undefined);
+    await processes.closeAll();
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (opts.persistRuntime !== false) clearRuntimeState(workspace.id);
