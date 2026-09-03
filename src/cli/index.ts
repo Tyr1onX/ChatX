@@ -18,9 +18,7 @@ import {
 } from "../tunnel/named-provision.js";
 import { parseZoneInput, suggestedNamedHostname } from "../tunnel/hostname.js";
 import {
-  chooseOpenAITunnel,
   isNamedTunnelReady,
-  isOpenAITunnelReady,
   NAMED_LOGIN_PROMPT,
   NAMED_REPAIR_MESSAGE,
   needsTunnelChoice,
@@ -32,7 +30,6 @@ import { getStateDir } from "../config/paths.js";
 import { ensureSandboxAllowlist, getCodexConfigPath, isStateDirAllowlisted } from "../config/sandbox-allow.js";
 import {
   CHATGPT_CREATE_CONNECTOR_URL,
-  CHATGPT_DEVELOPER_MODE_URL,
   CHATGPT_PLUGINS_URL,
   connectorAction,
   connectorNameFor,
@@ -99,11 +96,6 @@ function tunnelChoicePayload(workspace: Workspace, zoneHint?: string): Record<st
     preference: state.preference,
     loggedIn: hasCloudflaredCert(),
     namedReady: isNamedTunnelReady(state),
-    openaiReady: isOpenAITunnelReady(state),
-    tunnelId: state.preference === "openai" ? state.tunnelId ?? null : null,
-    openaiAlias: state.openaiAlias ?? null,
-    runtimeKeyEnv: state.runtimeKeyEnv ?? null,
-    openaiProxyUrl: state.openaiProxyUrl ?? null,
     zone,
     hostname: state.hostname ?? null,
     suggestedHostname: zone ? suggestedNamedHostname(zone, workspace.name, workspace.id) : null,
@@ -125,10 +117,7 @@ function trySandboxAllow():
 }
 
 interface TunnelStartResponse {
-  url?: string | null;
-  tunnelId?: string | null;
-  provider?: string;
-  ready?: boolean;
+  url?: string;
   error?: string;
   message?: string;
 }
@@ -144,15 +133,7 @@ interface AdminInfo {
   workspaceRoot: string;
   port: number;
   publicUrl: string | null;
-  tunnel: {
-    running: boolean;
-    url: string | null;
-    provider: string;
-    tunnelId?: string | null;
-    ready?: boolean;
-    uiUrl?: string;
-    detail?: string;
-  };
+  tunnel: { running: boolean; url: string | null; provider: string };
   tokenCount: number;
   pairingActive: boolean;
   pid: number;
@@ -162,33 +143,23 @@ interface AdminInfo {
 async function ensureBridgeAndTunnel(
   workspaceRoot: string,
   opts: { tunnel: boolean }
-): Promise<{ runtime: RuntimeState; info: AdminInfo; mcpUrl: string | null; tunnelId: string | null }> {
+): Promise<{ runtime: RuntimeState; info: AdminInfo; mcpUrl: string | null }> {
   const { runtime } = await ensureBridge(workspaceRoot);
   let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
   let mcpUrl: string | null = info.publicUrl ? `${info.publicUrl}/mcp` : null;
-  let tunnelId: string | null = info.tunnel.running ? info.tunnel.tunnelId ?? null : null;
-  if (opts.tunnel && !info.tunnel.running) {
-    const state = readTunnelState(info.workspaceId);
+  if (opts.tunnel && !info.publicUrl) {
     const binaries = detectTunnelBinaries();
-    if (state.preference === "openai") {
-      if (!isOpenAITunnelReady(state)) {
-        throw new Error("OPENAI_TUNNEL_NOT_CONFIGURED: choose an OpenAI tunnel id first.");
-      }
-      if (!binaries.tunnelClient) {
-        throw new Error("NEED_TUNNEL_CLIENT: tunnel-client is not installed or is not on PATH.");
-      }
-    } else if (!binaries.cloudflared) {
+    if (!binaries.cloudflared) {
       throw new Error(
         "NEED_CLOUDFLARED: cloudflared is not installed. Install it first (macOS: brew install cloudflared)."
       );
     }
     const result = await adminFetch<TunnelStartResponse>(runtime, "POST", "/admin/tunnel/start", 90_000);
-    if (!result.url && !result.tunnelId) throw new Error(result.message ?? "Tunnel start failed");
+    if (!result.url) throw new Error(result.message ?? "Tunnel start failed");
     info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
-    mcpUrl = result.url ? `${result.url}/mcp` : null;
-    tunnelId = result.tunnelId ?? info.tunnel.tunnelId ?? null;
+    mcpUrl = `${result.url}/mcp`;
   }
-  return { runtime, info, mcpUrl, tunnelId };
+  return { runtime, info, mcpUrl };
 }
 
 program
@@ -230,7 +201,7 @@ program
   .action(async (opts: { workspace?: string; tunnel: boolean; json: boolean }) => {
     const root = resolveWorkspace(opts.workspace);
     try {
-      const { runtime, info, mcpUrl, tunnelId } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
+      const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
         ? persistWorkspaceEndpoint({
             workspaceId: info.workspaceId,
@@ -241,12 +212,12 @@ program
           })
         : readLastEndpoint(info.workspaceId)?.connectorName;
       if (opts.json) {
-        say(JSON.stringify({ ok: true, port: runtime.port, workspaceId: info.workspaceId, mcpUrl, tunnelId, connectorName }));
+        say(JSON.stringify({ ok: true, port: runtime.port, workspaceId: info.workspaceId, mcpUrl, connectorName }));
         return;
       }
       check(`当前项目已识别（${info.workspaceName}）`);
       check("Workspace Bridge 已启动");
-      if (mcpUrl || tunnelId) check("安全连接已建立");
+      if (mcpUrl) check("安全连接已建立");
     } catch (error) {
       handleCliError(error, opts.json);
     }
@@ -270,7 +241,7 @@ program
         say("");
       }
       const sandbox = trySandboxAllow();
-      const { runtime, info, mcpUrl, tunnelId } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
+      const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
         ? persistWorkspaceEndpoint({
             workspaceId: info.workspaceId,
@@ -285,9 +256,7 @@ program
             previousName: readLastEndpoint(info.workspaceId)?.connectorName,
             hadEndpointBefore: Boolean(readLastEndpoint(info.workspaceId)),
           });
-      const pairingResult = tunnelId
-        ? null
-        : await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
+      const pairingResult = await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
       const tunnelState = readTunnelState(info.workspaceId);
       if (opts.json) {
         say(
@@ -296,14 +265,13 @@ program
             workspaceId: info.workspaceId,
             workspaceName: info.workspaceName,
             connectorName,
-            mcpUrl: mcpUrl ?? (tunnelId ? null : `http://127.0.0.1:${runtime.port}/mcp`),
-            tunnelId,
-            local: mcpUrl === null && tunnelId === null,
-            pairingCode: pairingResult?.code ?? null,
-            pairingExpiresAt: pairingResult?.expiresAt ?? null,
+            mcpUrl: mcpUrl ?? `http://127.0.0.1:${runtime.port}/mcp`,
+            local: mcpUrl === null,
+            pairingCode: pairingResult.code,
+            pairingExpiresAt: pairingResult.expiresAt,
             sandbox,
             tunnel: {
-              mode: tunnelState.preference,
+              mode: isNamedTunnelReady(tunnelState) ? "named" : "quick",
               hostname: tunnelState.hostname ?? null,
               fallback: Boolean(tunnelState.fallbackReason),
             },
@@ -313,22 +281,13 @@ program
       }
       check(`当前项目已识别（${info.workspaceName}）`);
       check("Workspace Bridge 已启动");
-      if (mcpUrl || tunnelId) check("安全连接已建立");
+      if (mcpUrl) check("安全连接已建立");
       say("");
-      if (tunnelId) {
-        say(`Tunnel ID：${tunnelId}`);
-        say("");
-        say("下一步：在 ChatGPT 连接器设置中选择 Connection: Tunnel，并选择或粘贴以上 Tunnel ID。");
-        say("OpenAI Tunnel 模式不使用 ChatX 的公网 OAuth 配对页。");
-      } else {
-        say(`连接地址：${mcpUrl ?? `http://127.0.0.1:${runtime.port}/mcp`}`);
-        if (pairingResult) {
-          say(`配对码：${pairingResult.code}（${Math.round((pairingResult.expiresAt - Date.now()) / 60000)} 分钟内有效）`);
-        }
-        say("");
-        say("下一步：在 ChatGPT 的连接器设置中添加以上地址（OAuth），并在授权页输入配对码。");
-        say("如果你在使用 Codex Skill，这一步会自动完成。");
-      }
+      say(`连接地址：${mcpUrl ?? `http://127.0.0.1:${runtime.port}/mcp`}`);
+      say(`配对码：${pairingResult.code}（${Math.round((pairingResult.expiresAt - Date.now()) / 60000)} 分钟内有效）`);
+      say("");
+      say("下一步：在 ChatGPT 的连接器设置中添加以上地址（OAuth），并在授权页输入配对码。");
+      say("如果你在使用 Codex Skill，这一步会自动完成。");
     } catch (error) {
       handleCliError(error, opts.json);
     }
@@ -356,9 +315,9 @@ program
     await stopBridge(root);
     await new Promise((resolve) => setTimeout(resolve, 500));
     try {
-      const { info, mcpUrl, tunnelId } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
+      const { info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       check(`Bridge 已重启（${info.workspaceName}）`);
-      if (mcpUrl || tunnelId) check(`安全连接已建立`);
+      if (mcpUrl) check(`安全连接已建立`);
     } catch (error) {
       handleCliError(error, false);
     }
@@ -390,7 +349,6 @@ program
     check(`Workspace：${info.workspaceName}`);
     check(`Bridge：运行中（端口 ${info.port}）`);
     if (info.tunnel.running && info.tunnel.url) check(`安全连接：${info.tunnel.url}/mcp`);
-    else if (info.tunnel.running && info.tunnel.tunnelId) check(`安全连接：OpenAI Tunnel ${info.tunnel.tunnelId}`);
     else say("· 安全连接：未启用（本地模式）");
     say(`· 已授权连接：${info.tokenCount > 0 ? "是" : "否"}`);
   });
@@ -408,11 +366,9 @@ program
     const report: Record<string, { ok: boolean; detail?: string }> = {};
     const results: string[] = [];
 
-    // Node
     const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
     report.node = { ok: nodeMajor >= 20, detail: `v${process.versions.node}` };
 
-    // Codex sandbox writable_roots (so later chats do not need elevation)
     if (opts.fix) {
       const sandbox = trySandboxAllow();
       if (sandbox.ok) {
@@ -432,7 +388,6 @@ program
       }
     }
 
-    // Workspace
     let workspace: Workspace | null = null;
     try {
       workspace = new Workspace(root);
@@ -441,7 +396,6 @@ program
       report.workspace = { ok: false, detail: (error as Error).message };
     }
 
-    // Bridge
     let runtime: RuntimeState | null = null;
     if (workspace) {
       runtime = await findLiveBridge(workspace.id);
@@ -457,11 +411,6 @@ program
       else report.bridge = report.bridge ?? { ok: false, detail: "未运行" };
     }
 
-    const selectedTunnelState = workspace ? readTunnelState(workspace.id) : null;
-    const selectedOpenAI = selectedTunnelState ? isOpenAITunnelReady(selectedTunnelState) : false;
-
-    // MCP local reachability. Public transports expect ChatX OAuth (401 without
-    // a token); OpenAI Tunnel uses a loopback-only MCP target without ChatX OAuth.
     if (runtime) {
       try {
         const response = await fetch(`http://127.0.0.1:${runtime.port}/mcp`, {
@@ -469,24 +418,13 @@ program
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", method: "ping", id: 1 }),
         });
-        if (selectedOpenAI) {
-          report.mcp = {
-            ok: response.status !== 401 && response.status < 500,
-            detail: `OpenAI Tunnel 本地 MCP 返回 ${response.status}`,
-          };
-          report.oauth = { ok: true, detail: "OpenAI Tunnel 模式不使用 ChatX 公网 OAuth" };
-        } else {
-          report.mcp = { ok: response.status === 401, detail: `未授权请求返回 ${response.status}` };
-          report.oauth = { ok: response.status === 401 };
-        }
+        report.mcp = { ok: response.status === 401, detail: `未授权请求返回 ${response.status}` };
+        report.oauth = { ok: response.status === 401 };
       } catch (error) {
         report.mcp = { ok: false, detail: (error as Error).message };
       }
     }
 
-    // Tunnel + remote reachability. If this workspace once had a public URL,
-    // a full quit reclaims it — restore a tunnel and tell the Skill to update
-    // the existing ChatGPT connector (never treat that as "local mode").
     const lastEndpoint = workspace ? readLastEndpoint(workspace.id) : null;
     const connectorName = workspace
       ? connectorNameFor({
@@ -496,8 +434,7 @@ program
           hadEndpointBefore: Boolean(lastEndpoint),
         })
       : PRODUCT_NAME;
-    const tunnelState = selectedTunnelState;
-    const openaiReady = selectedOpenAI;
+    const tunnelState = workspace ? readTunnelState(workspace.id) : null;
     const namedReady = tunnelState ? isNamedTunnelReady(tunnelState) : false;
     let namedRepair: { needed: boolean; userMessage?: string } = { needed: false };
     let chatgptRepair: {
@@ -511,7 +448,6 @@ program
       pairingCode?: string;
       pairingExpiresAt?: number;
       pages: {
-        developerMode: string;
         plugins: string;
         createConnector: string;
       };
@@ -522,49 +458,12 @@ program
       mcpUrl: lastEndpoint?.mcpUrl ?? null,
       previousMcpUrl: lastEndpoint?.mcpUrl ?? null,
       pages: {
-        developerMode: CHATGPT_DEVELOPER_MODE_URL,
         plugins: CHATGPT_PLUGINS_URL,
         createConnector: CHATGPT_CREATE_CONNECTOR_URL,
       },
     };
 
-    if (runtime && openaiReady) {
-      let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
-      if (opts.fix && info.tunnel.provider !== "openai-secure-mcp") {
-        await stopBridge(root);
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        try {
-          runtime = (await ensureBridge(root)).runtime;
-          info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
-          results.push("已切换到 OpenAI Secure MCP Tunnel provider");
-        } catch (error) {
-          report.tunnel = { ok: false, detail: (error as Error).message };
-        }
-      }
-      if (!info.tunnel.running && opts.fix) {
-        const binaries = detectTunnelBinaries();
-        if (!binaries.tunnelClient) {
-          report.tunnel = { ok: false, detail: "NEED_TUNNEL_CLIENT" };
-        } else {
-          try {
-            const started = await adminFetch<TunnelStartResponse>(runtime, "POST", "/admin/tunnel/start", 90_000);
-            info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
-            if (started.tunnelId) results.push("已重新建立 OpenAI Secure MCP Tunnel");
-          } catch (error) {
-            report.tunnel = { ok: false, detail: (error as Error).message };
-          }
-        }
-      }
-      if (info.tunnel.running && info.tunnel.tunnelId && info.tunnel.ready !== false) {
-        report.tunnel = { ok: true, detail: `OpenAI ${info.tunnel.tunnelId}` };
-      } else {
-        report.tunnel = report.tunnel ?? {
-          ok: false,
-          detail: info.tunnel.detail ?? "OPENAI_TUNNEL_DOWN",
-        };
-      }
-      report.oauth = { ok: true, detail: "远端访问由 OpenAI Tunnel 权限控制" };
-    } else if (runtime) {
+    if (runtime) {
       let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
       if (namedReady && opts.fix && info.tunnel.provider !== "cloudflare-named") {
         await stopBridge(root);
@@ -664,8 +563,6 @@ program
       } else {
         report.tunnel = { ok: false, detail: "公网地址无法访问" };
       }
-    } else if (openaiReady) {
-      report.tunnel = { ok: false, detail: "OPENAI_TUNNEL_DOWN" };
     } else if (namedReady) {
       report.tunnel = { ok: false, detail: "NAMED_TUNNEL_DOWN" };
       namedRepair = { needed: true, userMessage: NAMED_REPAIR_MESSAGE };
@@ -761,7 +658,6 @@ program
     if (runtime) {
       await adminFetch(runtime, "POST", "/admin/revoke-all");
     } else {
-      // bridge not running: revoke directly in the persisted store
       new AuthStore(workspace.id).revokeAll();
     }
     check("已断开 ChatGPT 对当前项目的访问（所有令牌已吊销）");
@@ -853,7 +749,7 @@ program
   .option("--json", "machine-readable output", false)
   .action((opts: { force: boolean; json: boolean }) => {
     const file = path.join(getStateDir(), "update-check.json");
-    const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local tz
+    const today = new Date().toLocaleDateString("en-CA");
     let last: { date?: string; updateAvailable?: boolean } = {};
     try {
       last = JSON.parse(fs.readFileSync(file, "utf8")) as typeof last;
@@ -881,8 +777,6 @@ program
     const local = runGit(["rev-parse", "HEAD"]);
     const remote = runGit(["ls-remote", "origin", "HEAD"]);
     if (!local.ok || !remote.ok || !remote.stdout) {
-      // Offline or not a git checkout: skip quietly and retry tomorrow-ish (do not
-      // record the date so a transient failure does not suppress the daily check).
       emit({ checked: false, updateAvailable: false, note: "无法检查更新（离线或非 git 安装），已跳过。" });
       return;
     }
@@ -1035,7 +929,6 @@ tunnelCmd
         return;
       }
       if (payload.needsChoice) say(TUNNEL_CHOICE_PROMPT);
-      else if (payload.openaiReady) check(`OpenAI Tunnel：${payload.tunnelId}`);
       else if (payload.namedReady) check(`固定域名：${payload.hostname}`);
       else say("当前使用临时地址。");
     } catch (error) {
@@ -1045,27 +938,13 @@ tunnelCmd
 
 tunnelCmd
   .command("choose")
-  .description("Choose Cloudflare quick/named or OpenAI Secure MCP Tunnel")
-  .requiredOption("--mode <mode>", "quick, named, or openai")
+  .description("Choose a temporary or stable Cloudflare connection")
+  .requiredOption("--mode <mode>", "quick or named")
   .option("-w, --workspace <path>")
   .option("--zone <domain>", "Cloudflare domain for a named hostname")
   .option("--hostname <hostname>", "override the default c2c-<project>.<zone>")
-  .option("--tunnel-id <id>", "existing OpenAI Secure MCP Tunnel id")
-  .option("--alias <name>", "local tunnel-client runtime alias")
-  .option("--runtime-key-env <name>", "environment variable containing the runtime API key", "CONTROL_PLANE_API_KEY")
-  .option("--proxy-url <url>", "HTTP(S) proxy used only by tunnel-client")
   .option("--json", "machine-readable output", false)
-  .action(async (opts: {
-    mode: string;
-    workspace?: string;
-    zone?: string;
-    hostname?: string;
-    tunnelId?: string;
-    alias?: string;
-    runtimeKeyEnv: string;
-    proxyUrl?: string;
-    json: boolean;
-  }) => {
+  .action(async (opts: { mode: string; workspace?: string; zone?: string; hostname?: string; json: boolean }) => {
     const root = resolveWorkspace(opts.workspace);
     try {
       const workspace = new Workspace(root);
@@ -1081,29 +960,8 @@ tunnelCmd
         else check("已选用临时地址");
         return;
       }
-      if (mode === "openai") {
-        if (!opts.tunnelId) {
-          throw new Error("OpenAI mode requires --tunnel-id tunnel_<32 lowercase hexadecimal characters>.");
-        }
-        const state = chooseOpenAITunnel({
-          workspaceId: workspace.id,
-          tunnelId: opts.tunnelId,
-          alias: opts.alias,
-          runtimeKeyEnv: opts.runtimeKeyEnv,
-          proxyUrl: opts.proxyUrl,
-        });
-        if (await findLiveBridge(workspace.id)) await stopBridge(root);
-        const binaries = detectTunnelBinaries();
-        const payload = { ...tunnelChoicePayload(workspace), state, tunnelClientFound: Boolean(binaries.tunnelClient) };
-        if (opts.json) say(JSON.stringify(payload));
-        else {
-          check(`已选择 OpenAI Secure MCP Tunnel：${state.tunnelId}`);
-          if (!binaries.tunnelClient) say("· tunnel-client 尚未安装；当前只是完成配置，不影响现有 Cloudflare 连接代码。");
-        }
-        return;
-      }
       if (mode !== "named") {
-        throw new Error("mode must be quick, named, or openai");
+        throw new Error("mode must be quick or named");
       }
       const zone = parseZoneInput(opts.zone ?? "");
       if (!zone) {
@@ -1168,9 +1026,6 @@ function handleCliError(error: unknown, json: boolean): void {
   const message = error instanceof Error ? error.message : String(error);
   if (json) {
     say(JSON.stringify({ ok: false, error: message }));
-  } else if (message.startsWith("NEED_TUNNEL_CLIENT")) {
-    say("需要先安装 OpenAI tunnel-client，当前 ChatX / Cloudflare 连接没有被修改。");
-    process.exitCode = 1;
   } else if (message.startsWith("NEED_CLOUDFLARED")) {
     say("需要你完成一步：");
     say("");
