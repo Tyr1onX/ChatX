@@ -176,7 +176,7 @@ async function searchWithNode(
   return { matches, matchCount: matches.length, truncated, engine: "node" };
 }
 
-function globToRegex(glob: string): RegExp {
+export function globToRegex(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]]/g, "\\$&")
     .replace(/\*\*\//g, "\u0000")

@@ -10,6 +10,8 @@ import {
   WorkspaceMutationError,
 } from "../workspace/mutate.js";
 import { searchWorkspace } from "../workspace/search.js";
+import { findWorkspaceFiles } from "../workspace/discovery.js";
+import { readWorkspaceFiles } from "../workspace/batch-read.js";
 import { gitDiff, gitInfo, gitStatus, type DiffMode } from "../workspace/git.js";
 import { gitLog, gitShow, GitHistoryError } from "../workspace/git-history.js";
 import { latestExecutionRecord, readExecutionRecords } from "../execution/records.js";
@@ -489,6 +491,33 @@ export function createMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool(
+    "find_files",
+    {
+      title: "Find workspace files",
+      description:
+        `Find files recursively by glob without reading file contents. Sensitive paths and high-noise ` +
+        `directories are hidden. Results are stable and offset-paginated; scanTruncated reports the ` +
+        `hard traversal safety cap. ${UNTRUSTED_NOTE}`,
+      inputSchema: {
+        path: z.string().default(".").describe("Workspace-relative directory to search"),
+        pattern: z.string().min(1).default("**/*").describe("Glob such as '*.ts' or 'src/**/*.tsx'"),
+        limit: z.number().int().min(1).max(500).default(100),
+        offset: z.number().int().min(0).default(0),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireScope(extra.authInfo, "workspace.read");
+      if (denied) return denied;
+      try {
+        return ok(await findWorkspaceFiles(workspace, args));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
     "list_directory",
     {
       title: "List directory",
@@ -534,6 +563,41 @@ export function createMcpServer(ctx: McpContext): McpServer {
       if (denied) return denied;
       try {
         return ok(await workspace.readFile(args.path, { startLine: args.start_line, endLine: args.end_line }));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "read_files",
+    {
+      title: "Read multiple workspace files",
+      description:
+        `Read up to 20 text files in one call to reduce MCP round trips. Each file is bounded to 128 KiB ` +
+        `and the whole batch to 512 KiB. Missing or denied files return per-file errors without exposing ` +
+        `sensitive content. Use read_file for precise follow-up pagination. ${UNTRUSTED_NOTE}`,
+      inputSchema: {
+        files: z.array(z.object({
+          path: z.string().min(1).describe("Workspace-relative file path"),
+          start_line: z.number().int().min(1).optional(),
+          end_line: z.number().int().min(1).optional(),
+        })).min(1).max(20),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireScope(extra.authInfo, "workspace.read");
+      if (denied) return denied;
+      try {
+        return ok(await readWorkspaceFiles(
+          workspace,
+          args.files.map((file) => ({
+            path: file.path,
+            startLine: file.start_line,
+            endLine: file.end_line,
+          }))
+        ));
       } catch (error) {
         return mapError(error);
       }
