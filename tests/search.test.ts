@@ -25,6 +25,7 @@ beforeAll(() => {
   write(root, "exact-limit.txt", "needle-exact-limit\n".repeat(10));
   write(root, "ignored-search/hidden.txt", "needle-exact-limit\n");
   write(root, "smart-case.txt", "needle-smart-case\nNeedle-Smart-Case\nNEEDLE-SMART-CASE\n");
+  write(root, "single-heavy.txt", "needle-single-heavy\n".repeat(30));
   for (let i = 0; i < 30; i++) {
     write(root, `many/file-${i}.txt`, "needle-beta\nneedle-beta\n");
   }
@@ -125,6 +126,20 @@ describe.each(engines())("search engine: %s", (engine) => {
     const result = await searchWorkspace(ws, { query: "needle-beta", limit: 10 });
     expect(result.matches.length).toBe(10);
     expect(result.matchCount).toBe(10);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("uses the global limit instead of a lower per-file match cap", async () => {
+    configure();
+    const result = await searchWorkspace(ws, {
+      query: "needle-single-heavy",
+      path: "single-heavy.txt",
+      limit: 25,
+    });
+    expect(result.engine).toBe(engine);
+    expect(result.matches).toHaveLength(25);
+    expect(result.matchCount).toBe(25);
+    expect(result.matches.map((match) => match.line)).toEqual(Array.from({ length: 25 }, (_, index) => index + 1));
     expect(result.truncated).toBe(true);
   });
 

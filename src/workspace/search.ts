@@ -93,7 +93,7 @@ async function searchWithRipgrep(
   opts: SearchOptions,
   limit: number
 ): Promise<SearchResult> {
-  const args = ["--json", "--max-filesize", "2M", "--max-count", "20"];
+  const args = ["--json", "--max-filesize", "2M"];
   if (!opts.regex) args.push("-F");
   args.push("--smart-case");
   if (opts.glob) args.push("-g", opts.glob);
