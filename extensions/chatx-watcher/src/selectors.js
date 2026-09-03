@@ -39,6 +39,21 @@
     return null;
   }
 
+  function isHidden(node) {
+    if (!node) return true;
+    if (node.hidden || node.getAttribute?.("aria-hidden") === "true") return true;
+    return Boolean(node.closest?.('[hidden], [aria-hidden="true"]'));
+  }
+
+  function queryFirstVisible(root, list) {
+    for (const selector of list) {
+      for (const node of root.querySelectorAll(selector)) {
+        if (!isHidden(node)) return node;
+      }
+    }
+    return null;
+  }
+
   function queryAll(root, list) {
     const result = [];
     for (const selector of list) {
@@ -54,17 +69,23 @@
   }
 
   function getLastAssistantMessage(root) {
-    const messages = queryAll(root ?? document, selectors.assistantMessage);
+    const messages = queryAll(root ?? document, selectors.assistantMessage)
+      .filter((node) => !isHidden(node));
     return messages.at(-1) ?? null;
   }
 
   function isGenerationActive() {
-    return Boolean(queryFirst(document, selectors.generationControl));
+    return queryAll(document, selectors.generationControl).some((node) =>
+      !isHidden(node) &&
+      !node.disabled &&
+      node.getAttribute?.("aria-disabled") !== "true"
+    );
   }
 
   function isGenerationBusy(root) {
     const target = root ?? document;
     return queryAll(target, selectors.generationBusy).some((node) => {
+      if (isHidden(node)) return false;
       if (node.closest?.('button[data-testid="send-button"]')) return false;
       return node.getAttribute("aria-busy") === "true" ||
         node.getAttribute("data-state") === "running" ||
@@ -73,7 +94,7 @@
   }
 
   function isComposerIdle() {
-    const input = queryFirst(document, selectors.composerInput);
+    const input = queryFirstVisible(document, selectors.composerInput);
     if (!input) return false;
     if (input.disabled) return false;
     if (input.getAttribute("aria-disabled") === "true") return false;

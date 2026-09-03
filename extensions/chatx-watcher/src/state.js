@@ -51,6 +51,14 @@ export function startRun(state, metadata, now, runId) {
     current &&
     (current.state === RunState.RUNNING || current.state === RunState.FINISH_CANDIDATE)
   ) {
+    // Re-attaching a tab while a run is only a finish candidate invalidates
+    // that candidate. A refresh/remount is fresh uncertainty, so require a
+    // new stable window instead of inheriting a half-confirmed completion.
+    if (current.state === RunState.FINISH_CANDIDATE) {
+      current.state = RunState.RUNNING;
+      current.lastMutationAt = metadata.lastMutationAt ?? now;
+      delete current.candidateAt;
+    }
     mergeMetadata(current, metadata);
     return { run: current, started: false };
   }

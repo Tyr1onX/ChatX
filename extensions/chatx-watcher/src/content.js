@@ -14,6 +14,7 @@
   let currentConversationId = null;
   let currentRunId = null;
   let runActive = false;
+  let runStarting = false;
   let sawAssistantMutation = false;
   let lastAssistantMutationAt = 0;
   let candidateSent = false;
@@ -21,6 +22,7 @@
   let confirmTimer = null;
   let ackTimer = null;
   let evaluationQueued = false;
+  let pendingMutationRecords = [];
 
   function parseConversationId(url = location.href) {
     try {
@@ -52,9 +54,11 @@
   function resetLocalRun() {
     currentRunId = null;
     runActive = false;
+    runStarting = false;
     sawAssistantMutation = false;
     lastAssistantMutationAt = 0;
     candidateSent = false;
+    pendingMutationRecords = [];
     if (finishTimer) clearTimeout(finishTimer);
     if (confirmTimer) clearTimeout(confirmTimer);
     finishTimer = null;
@@ -110,28 +114,44 @@
     }
   }
 
-  async function beginRun(now) {
-    if (!currentConversationId || runActive) return;
+  async function beginRun(now, activityObserved = false) {
+    if (!currentConversationId || runActive || runStarting) return;
 
-    // If the extension attaches in the middle of an already-running response,
-    // treat the existing assistant surface as activity from this run. We still
-    // require the full stable + confirmation windows before completion.
-    if (!sawAssistantMutation && api.getLastAssistantMessage(root)) {
-      sawAssistantMutation = true;
-      lastAssistantMutationAt = now;
+    runStarting = true;
+
+    // New local run attempts must never inherit completion evidence from the
+    // previous run. If this is actually a refresh/re-attach to an in-flight
+    // run, Background returns the persisted lastMutationAt and we restore it.
+    sawAssistantMutation = Boolean(activityObserved);
+    lastAssistantMutationAt = activityObserved ? now : 0;
+    candidateSent = false;
+    if (finishTimer) clearTimeout(finishTimer);
+    if (confirmTimer) clearTimeout(confirmTimer);
+    finishTimer = null;
+    confirmTimer = null;
+
+    try {
+      const response = await sendMessage({
+        type: "RUN_STARTED",
+        metadata: {
+          ...metadata(),
+          lastMutationAt: now,
+        },
+      });
+      if (!response?.runId) return;
+
+      currentRunId = response.runId;
+      runActive = true;
+
+      if (!response.started && response.lastMutationAt) {
+        sawAssistantMutation = true;
+        lastAssistantMutationAt = Math.max(lastAssistantMutationAt, response.lastMutationAt);
+      }
+
+      scheduleCompletionCheck();
+    } finally {
+      runStarting = false;
     }
-
-    const response = await sendMessage({
-      type: "RUN_STARTED",
-      metadata: {
-        ...metadata(),
-        lastMutationAt: lastAssistantMutationAt || now,
-      },
-    });
-    if (!response?.runId) return;
-    currentRunId = response.runId;
-    runActive = true;
-    scheduleCompletionCheck();
   }
 
   async function cancelCandidate(now) {
@@ -228,11 +248,11 @@
       runActive = false;
       candidateSent = false;
       currentRunId = response.runId ?? currentRunId;
+      scheduleAcknowledgeCheck();
     }
   }
 
   async function evaluateMutations(records) {
-    evaluationQueued = false;
     if (!enabled) return;
 
     await syncConversation();
@@ -249,23 +269,41 @@
       if (candidateSent) await cancelCandidate(now);
     }
 
-    if (!runActive && signals.generationActive) {
-      await beginRun(now);
+    if (
+      !runActive &&
+      !runStarting &&
+      (signals.generationActive || signals.generationBusy)
+    ) {
+      await beginRun(now, assistantMutation);
     }
 
     if (runActive && assistantMutation) {
       scheduleCompletionCheck();
-    } else if (runActive && !signals.generationActive) {
+    } else if (runActive && !signals.generationActive && !signals.generationBusy) {
       scheduleCompletionCheck();
     }
 
     scheduleAcknowledgeCheck();
   }
 
+  async function flushMutations() {
+    try {
+      while (pendingMutationRecords.length) {
+        const records = pendingMutationRecords;
+        pendingMutationRecords = [];
+        await evaluateMutations(records);
+      }
+    } finally {
+      evaluationQueued = false;
+      if (pendingMutationRecords.length) onMutations([]);
+    }
+  }
+
   function onMutations(records) {
+    pendingMutationRecords.push(...records);
     if (evaluationQueued) return;
     evaluationQueued = true;
-    queueMicrotask(() => void evaluateMutations(records));
+    queueMicrotask(() => void flushMutations());
   }
 
   function attachRootObserver() {
@@ -300,7 +338,7 @@
 
     void syncConversation().then(() => {
       const signals = readSignals();
-      if (signals.generationActive) void beginRun(Date.now());
+      if (signals.generationActive || signals.generationBusy) void beginRun(Date.now());
       scheduleAcknowledgeCheck();
     });
   }

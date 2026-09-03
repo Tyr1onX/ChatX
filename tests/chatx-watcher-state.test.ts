@@ -189,4 +189,52 @@ describe("ChatX Watcher run state machine", () => {
     expect(restored.run.tabId).toBe(11);
     expect(state.runs).toHaveLength(1);
   });
+
+  it("refresh during FINISH_CANDIDATE restarts the stable confirmation window", () => {
+    const state = createEmptyWatcherState();
+    startRun(state, baseMetadata, 1000, "run-1");
+
+    const firstCandidate = markFinishCandidate(
+      state,
+      "run-1",
+      {
+        ...baseMetadata,
+        lastMutationAt: 1000,
+        signals: doneSignals(),
+      },
+      1000 + MIN_STABLE_MS
+    );
+    expect(firstCandidate.accepted).toBe(true);
+    expect(firstCandidate.run?.state).toBe(RunState.FINISH_CANDIDATE);
+
+    const restored = startRun(
+      state,
+      { ...baseMetadata, tabId: 12, lastMutationAt: 5000 },
+      5000,
+      "run-ignored"
+    );
+    expect(restored.started).toBe(false);
+    expect(restored.run.runId).toBe("run-1");
+    expect(restored.run.state).toBe(RunState.RUNNING);
+    expect(restored.run.lastMutationAt).toBe(5000);
+
+    const tooSoon = markFinishCandidate(
+      state,
+      "run-1",
+      {
+        ...baseMetadata,
+        signals: doneSignals({ stableForMs: MIN_STABLE_MS - 1 }),
+      },
+      5000 + MIN_STABLE_MS - 1
+    );
+    expect(tooSoon.accepted).toBe(false);
+
+    const secondCandidate = markFinishCandidate(
+      state,
+      "run-1",
+      { ...baseMetadata, signals: doneSignals() },
+      5000 + MIN_STABLE_MS
+    );
+    expect(secondCandidate.accepted).toBe(true);
+  });
 });

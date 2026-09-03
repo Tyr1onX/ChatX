@@ -11,6 +11,7 @@ import {
 } from "./state.js";
 import {
   BrowserNotificationSink,
+  notificationIdForRun,
   runIdFromNotificationId,
 } from "./notifications.js";
 
@@ -60,7 +61,12 @@ async function handleRunStarted(message, sender) {
   const result = startRun(state, metadata, Date.now(), runId);
   cleanupWatcherState(state, Date.now());
   await persistState();
-  return { runId: result.run.runId, started: result.started, state: result.run.state };
+  return {
+    runId: result.run.runId,
+    started: result.started,
+    state: result.run.state,
+    lastMutationAt: result.run.lastMutationAt ?? null,
+  };
 }
 
 async function handleRunActivity(message, sender) {
@@ -146,7 +152,14 @@ async function handleAcknowledge(message, sender) {
 
   const state = await loadState();
   const result = acknowledgeRun(state, metadata.conversationId, Date.now());
-  if (result.acknowledged) await persistState();
+  if (result.acknowledged) {
+    await persistState();
+    await Promise.allSettled(
+      (result.runIds ?? []).map((runId) =>
+        chrome.notifications.clear(notificationIdForRun(runId))
+      )
+    );
+  }
   return {
     acknowledged: result.acknowledged,
     runId: result.run?.runId ?? null,
