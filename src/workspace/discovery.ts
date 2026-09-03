@@ -105,15 +105,14 @@ export async function findWorkspaceFiles(
   };
 
   await walk(target.abs, target.rel);
-  const hasMore = foundExtra || scanTruncated;
   return {
     path: target.rel || ".",
     pattern,
     offset,
     limit,
     returned: collected.length,
-    hasMore,
-    nextOffset: hasMore ? offset + collected.length : null,
+    hasMore: foundExtra,
+    nextOffset: foundExtra ? offset + collected.length : null,
     scanTruncated,
     scannedEntries,
     files: collected,
