@@ -94,6 +94,11 @@ async function searchWithRipgrep(
   opts: SearchOptions,
   limit: number
 ): Promise<SearchResult> {
+  const searchRel = path.relative(ws.root, searchAbs).split(path.sep).join("/");
+  if (searchRel && (ws.ignoreRules.isNoise(searchRel) || ws.ignoreRules.isNoise(`${searchRel}/`))) {
+    return { matches: [], matchCount: 0, truncated: false, engine: "ripgrep" };
+  }
+
   const args = ["--no-config", "--json", "--max-filesize", "2M", "--hidden", "--no-ignore"];
   if (!opts.regex) args.push("-F");
   args.push("--smart-case");
