@@ -268,7 +268,7 @@ describe("MCP tools over Streamable HTTP", () => {
       exitStatus: "ok",
       timestamp: new Date().toISOString(),
     });
-    const summary = jsonOf<{ records: { taskId: string }[]>(
+    const summary = jsonOf<{ records: { taskId: string }[] }>(
       await client.callTool({ name: "execution_summary", arguments: {} })
     );
     expect(summary.records[0].taskId).toBe("c2c_test1");
