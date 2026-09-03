@@ -2,7 +2,7 @@
 
 **让 ChatGPT 安全地调用你电脑上的本地能力。**
 
-ChatX 是一个运行在你电脑上的 MCP 本地桥接器。它可以把指定项目目录、Git、本地进程和一个独立浏览器 Profile 暴露给 ChatGPT，同时尽量把权限限制在明确的边界内。
+ChatX 是一个运行在你电脑上的 MCP 本地桥接器。它把你授权的项目目录、Git、本地进程和独立浏览器能力提供给 ChatGPT，同时尽量把权限限制在明确边界内。
 
 [English](README.en.md) · [安全模型](docs/security.md) · [架构](docs/architecture.md) · [排障](docs/troubleshooting.md)
 
@@ -43,6 +43,24 @@ ChatGPT / MCP Client
 
 ChatX **不是远程桌面**，也不会默认接管你正在使用的 Chrome。浏览器能力使用独立 Profile。
 
+## ChatX 实际上分几部分？
+
+对普通用户来说，可以只记住四层：
+
+1. **ChatX CLI** — `chatx setup`、`chatx doctor` 这些命令。主要用于第一次配置和排障，通常执行完就退出。
+2. **ChatX Bridge** — 真正长期运行在本机的核心 Node.js 后台进程。ChatGPT 的 MCP 调用最终都由它处理。
+3. **Transport** — Cloudflare Quick / Named Tunnel，或实验性的 OpenAI Secure MCP Tunnel。它负责把远端 ChatGPT 安全地连接到本机 Bridge。
+4. **Capabilities** — Workspace、Git、Process、Browser 等真正提供给 AI 的本机能力。
+
+也就是说，正常使用时你并不需要一直操作命令行。理想流程是：
+
+```text
+第一次：安装 ChatX -> chatx setup -> 在 ChatGPT 添加连接器
+以后：直接和 ChatGPT 说话
+```
+
+Bridge 会在后台工作；CLI 只是安装、配置、查看状态和修复连接时使用的控制入口。
+
 ## 先确认你能不能用
 
 开始前建议确认：
@@ -58,7 +76,7 @@ ChatX **不是远程桌面**，也不会默认接管你正在使用的 Chrome。
 
 ### 1. 安装 Node.js 和 cloudflared
 
-Windows 可以使用：
+Windows：
 
 ```powershell
 winget install --id OpenJS.NodeJS.LTS
@@ -82,7 +100,7 @@ cloudflared --version
 
 ### 2. 安装 ChatX
 
-当前公开测试版本可以直接从 GitHub Release 安装：
+普通测试用户优先直接安装 GitHub Release：
 
 ```bash
 npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
@@ -168,7 +186,9 @@ chatx doctor
 列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
 ```
 
-如果 ChatGPT 能返回你本机项目的真实文件列表，说明完整链路已经工作。
+如果 ChatGPT 能返回你本机项目的真实文件列表，说明从 ChatGPT -> Tunnel -> ChatX Bridge -> 本地工作区的完整链路已经工作。
+
+第一次测试建议先从只读任务开始，再测试 Git、写文件和本地命令。
 
 ## 出问题先运行这个
 
@@ -186,7 +206,7 @@ chatx doctor
 - **完全重来**：`chatx stop` 后重新 `chatx setup`
 - **电脑重启后临时 Cloudflare 地址变化**：运行 `chatx doctor`，再按提示更新对应 ChatGPT Connector
 
-详细说明见 [排障文档](docs/troubleshooting.md)。
+详细说明见 [中文排障文档](docs/troubleshooting.md)。
 
 ## Cloudflare 临时地址和固定域名
 
