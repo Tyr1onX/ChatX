@@ -335,7 +335,7 @@ export function globToRegex(glob: string): RegExp {
     .replace(/\?/g, "[^/]")
     .replace(/\u0000/g, "(?:.*/)?")
     .replace(/\u0001/g, ".*");
-  return new RegExp(`(^|/)${escaped}$`, "i");
+  return new RegExp(`(^|/)${escaped}$`);
 }
 
 export async function searchWorkspace(ws: Workspace, opts: SearchOptions): Promise<SearchResult> {
