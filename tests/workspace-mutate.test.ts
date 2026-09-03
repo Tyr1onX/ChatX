@@ -82,6 +82,27 @@ describe("workspace mutation primitives", () => {
     }
   });
 
+  it.skipIf(process.platform === "win32")("moves and deletes symlink leaves without touching their targets", async () => {
+    const root = makeTmpDir("mutate-symlink");
+    try {
+      write(root, "target/data.txt", "keep-target\n");
+      fs.symlinkSync(path.join(root, "target"), path.join(root, "link-to-target"), "dir");
+      const workspace = new Workspace(root);
+
+      const moved = await moveWorkspacePath(workspace, "link-to-target", "moved-link");
+      expect(moved.type).toBe("symlink");
+      expect(fs.lstatSync(path.join(root, "moved-link")).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(root, "target/data.txt"), "utf8")).toBe("keep-target\n");
+
+      const deleted = await deleteWorkspacePath(workspace, "moved-link", { recursive: true });
+      expect(deleted.type).toBe("symlink");
+      expect(fs.existsSync(path.join(root, "moved-link"))).toBe(false);
+      expect(fs.readFileSync(path.join(root, "target/data.txt"), "utf8")).toBe("keep-target\n");
+    } finally {
+      cleanup(root);
+    }
+  });
+
   it("protects workspace root and .git from move/delete", async () => {
     const root = makeTmpDir("mutate-protected");
     try {
