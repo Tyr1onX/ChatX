@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import fs from "node:fs";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -59,6 +60,7 @@ describe("MCP tools over Streamable HTTP", () => {
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
+      "apply_patch",
       "browser_click",
       "browser_navigate",
       "browser_snapshot",
@@ -77,6 +79,32 @@ describe("MCP tools over Streamable HTTP", () => {
     for (const forbidden of ["delete_file", "execute_shell", "git_commit", "install_package"]) {
       expect(names).not.toContain(forbidden);
     }
+  });
+
+  it("applies precise workspace patches over MCP", async () => {
+    write(root, "src/patch-target.ts", "const keep = 1;\nconst timeout = 30000;\nconst tail = 2;\n");
+    const patched = await client.callTool({
+      name: "apply_patch",
+      arguments: {
+        edits: [{
+          path: "src/patch-target.ts",
+          old_text: "const timeout = 30000;",
+          new_text: "const timeout = 60000;",
+        }],
+      },
+    });
+    expect(patched.isError ?? false).toBe(false);
+    expect(jsonOf<{ editCount: number }>(patched).editCount).toBe(1);
+    expect(fs.readFileSync(path.join(root, "src/patch-target.ts"), "utf8")).toContain("timeout = 60000");
+
+    const conflict = await client.callTool({
+      name: "apply_patch",
+      arguments: {
+        edits: [{ path: "src/patch-target.ts", old_text: "const missing = true;", new_text: "x" }],
+      },
+    });
+    expect(conflict.isError).toBe(true);
+    expect(textOf(conflict)).toContain("PATCH_CONFLICT");
   });
 
   it("writes a workspace file and runs a local executable", async () => {
@@ -114,6 +142,11 @@ describe("MCP tools over Streamable HTTP", () => {
         arguments: { path: "writer-only.txt", content: "ok\n" },
       });
       expect(writeResult.isError ?? false).toBe(false);
+      const patchResult = await writer.callTool({
+        name: "apply_patch",
+        arguments: { edits: [{ path: "writer-only.txt", old_text: "ok", new_text: "patched" }] },
+      });
+      expect(patchResult.isError ?? false).toBe(false);
       const deniedRun = await writer.callTool({
         name: "run_command",
         arguments: { command: process.execPath, args: ["-e", "process.stdout.write('no')"] },
@@ -137,6 +170,12 @@ describe("MCP tools over Streamable HTTP", () => {
       });
       expect(deniedWrite.isError).toBe(true);
       expect(textOf(deniedWrite)).toContain("workspace.write");
+      const deniedPatch = await runner.callTool({
+        name: "apply_patch",
+        arguments: { edits: [{ path: "src/index.ts", old_text: "answer", new_text: "value" }] },
+      });
+      expect(deniedPatch.isError).toBe(true);
+      expect(textOf(deniedPatch)).toContain("workspace.write");
     } finally {
       await runner.close();
     }
@@ -229,7 +268,7 @@ describe("MCP tools over Streamable HTTP", () => {
       exitStatus: "ok",
       timestamp: new Date().toISOString(),
     });
-    const summary = jsonOf<{ records: { taskId: string }[] }>(
+    const summary = jsonOf<{ records: { taskId: string }[]>(
       await client.callTool({ name: "execution_summary", arguments: {} })
     );
     expect(summary.records[0].taskId).toBe("c2c_test1");
