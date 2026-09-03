@@ -24,6 +24,7 @@ beforeAll(() => {
   write(root, "node_modules/pkg/index.js", "needle-alpha in dependencies\n");
   write(root, "exact-limit.txt", "needle-exact-limit\n".repeat(10));
   write(root, "ignored-search/hidden.txt", "needle-exact-limit\n");
+  write(root, "smart-case.txt", "needle-smart-case\nNeedle-Smart-Case\nNEEDLE-SMART-CASE\n");
   for (let i = 0; i < 30; i++) {
     write(root, `many/file-${i}.txt`, "needle-beta\nneedle-beta\n");
   }
@@ -79,6 +80,36 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(result.matches).toEqual([]);
     expect(result.matchCount).toBe(0);
     expect(result.truncated).toBe(false);
+  });
+
+  it("uses smart-case semantics for literal queries", async () => {
+    configure();
+    const insensitive = await searchWorkspace(ws, { query: "needle-smart-case", path: "smart-case.txt" });
+    expect(insensitive.engine).toBe(engine);
+    expect(insensitive.matches.map((match) => match.line)).toEqual([1, 2, 3]);
+
+    const sensitive = await searchWorkspace(ws, { query: "Needle-Smart-Case", path: "smart-case.txt" });
+    expect(sensitive.engine).toBe(engine);
+    expect(sensitive.matches.map((match) => match.line)).toEqual([2]);
+  });
+
+  it("uses smart-case semantics for regex queries", async () => {
+    configure();
+    const insensitive = await searchWorkspace(ws, {
+      query: "needle-smart-(case)",
+      path: "smart-case.txt",
+      regex: true,
+    });
+    expect(insensitive.engine).toBe(engine);
+    expect(insensitive.matches.map((match) => match.line)).toEqual([1, 2, 3]);
+
+    const sensitive = await searchWorkspace(ws, {
+      query: "Needle-Smart-(Case)",
+      path: "smart-case.txt",
+      regex: true,
+    });
+    expect(sensitive.engine).toBe(engine);
+    expect(sensitive.matches.map((match) => match.line)).toEqual([2]);
   });
 
   it("never returns sensitive or noise files", async () => {
