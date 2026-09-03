@@ -19,6 +19,10 @@ import { writeRuntimeState, clearRuntimeState, type RuntimeState } from "./runti
 import { BrowserController } from "../browser/controller.js";
 import { ProcessSessionManager } from "../process/session-manager.js";
 
+const TUNNEL_RETRY_MIN_MS = 1_000;
+const TUNNEL_RETRY_MAX_MS = 30_000;
+const TUNNEL_HEALTH_MS = 1_000;
+
 function tunnelForWorkspace(workspaceId: string, logger: Logger): TunnelProvider {
   const binding = namedTunnelBinding(readTunnelState(workspaceId));
   if (binding) {
@@ -85,11 +89,17 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   const authStore = new AuthStore(workspace.id, { file: opts.authStoreFile });
   const pairing = new PairingManager(workspace.id, { ttlMs: opts.pairingTtlMs });
   const tunnel = tunnelForWorkspace(workspace.id, logger);
+  const restoreTunnel = tunnel.name === "cloudflare-named";
   const browser = new BrowserController();
   const processes = new ProcessSessionManager(workspace);
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
 
   let publicBaseUrl: string | null = null;
+  let tunnelStartPromise: Promise<string> | null = null;
+  let tunnelSupervisorTimer: NodeJS.Timeout | null = null;
+  let tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+  let tunnelWanted = restoreTunnel;
+  let closed = false;
 
   const app = express();
   app.set("trust proxy", true);
@@ -100,6 +110,64 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     const proto = req.protocol;
     const hostHeader = req.get("host") ?? `${host}:${port}`;
     return `${proto}://${hostHeader}`;
+  };
+
+  const startTunnel = (): Promise<string> => {
+    if (tunnelStartPromise) return tunnelStartPromise;
+    const status = tunnel.status();
+    if (status.running && status.url) {
+      publicBaseUrl = status.url;
+      persistRuntime();
+      return Promise.resolve(status.url);
+    }
+    tunnelStartPromise = tunnel
+      .start(port)
+      .then((url) => {
+        if (!closed) {
+          publicBaseUrl = url;
+          tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+          persistRuntime();
+        }
+        return url;
+      })
+      .finally(() => {
+        tunnelStartPromise = null;
+      });
+    return tunnelStartPromise;
+  };
+
+  const clearTunnelSupervisor = (): void => {
+    if (!tunnelSupervisorTimer) return;
+    clearTimeout(tunnelSupervisorTimer);
+    tunnelSupervisorTimer = null;
+  };
+
+  const scheduleTunnelSupervisor = (delayMs: number): void => {
+    if (closed || !restoreTunnel || !tunnelWanted || tunnelSupervisorTimer) return;
+    tunnelSupervisorTimer = setTimeout(() => {
+      tunnelSupervisorTimer = null;
+      void superviseTunnel();
+    }, delayMs);
+    tunnelSupervisorTimer.unref();
+  };
+
+  const superviseTunnel = async (): Promise<void> => {
+    if (closed || !tunnelWanted) return;
+    if (tunnel.status().running) {
+      tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+      scheduleTunnelSupervisor(TUNNEL_HEALTH_MS);
+      return;
+    }
+    try {
+      await startTunnel();
+      tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+      scheduleTunnelSupervisor(TUNNEL_HEALTH_MS);
+    } catch (error) {
+      const delayMs = tunnelRetryDelayMs;
+      tunnelRetryDelayMs = Math.min(tunnelRetryDelayMs * 2, TUNNEL_RETRY_MAX_MS);
+      logger.warn(`Tunnel restore failed: ${(error as Error).message}; retrying in ${delayMs}ms`);
+      scheduleTunnelSupervisor(delayMs);
+    }
   };
 
   app.get("/health", (_req, res) => {
@@ -166,20 +234,22 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   });
 
   app.post("/admin/tunnel/start", adminGuard, (_req, res) => {
-    tunnel
-      .start(port)
+    tunnelWanted = true;
+    void startTunnel()
       .then((url) => {
-        publicBaseUrl = url;
-        persistRuntime();
+        if (restoreTunnel) scheduleTunnelSupervisor(TUNNEL_HEALTH_MS);
         res.json({ url });
       })
       .catch((error: Error) => {
+        if (restoreTunnel) scheduleTunnelSupervisor(tunnelRetryDelayMs);
         logger.error(`Tunnel start failed: ${error.message}`);
         res.status(500).json({ error: "tunnel_failed", message: error.message });
       });
   });
 
   app.post("/admin/tunnel/stop", adminGuard, (_req, res) => {
+    tunnelWanted = false;
+    clearTunnelSupervisor();
     void tunnel.stop().then(() => {
       publicBaseUrl = null;
       persistRuntime();
@@ -221,11 +291,13 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     writeRuntimeState(state);
   };
   persistRuntime();
+  if (restoreTunnel) scheduleTunnelSupervisor(0);
 
-  let closed = false;
   const shutdown = async (): Promise<void> => {
     if (closed) return;
     closed = true;
+    tunnelWanted = false;
+    clearTunnelSupervisor();
     await tunnel.stop().catch(() => undefined);
     await processes.closeAll();
     await browser.close();
