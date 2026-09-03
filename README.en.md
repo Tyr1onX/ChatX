@@ -31,24 +31,74 @@ Workspace / Git / Process / Dedicated browser
 
 Typical tasks include inspecting project files, reviewing Git state, applying requested workspace changes, running local commands, reading logs, and validating pages in ChatX's separate browser profile.
 
-## Before you start
+## Recommended setup: let Codex / an AI Agent do it
 
-A complete ChatX setup requires:
+Users should not need to manually manage Node.js, Bridge processes, ports, or Cloudflare commands.
 
-1. Node.js 20+, `cloudflared`, and a local project workspace.
-2. A ChatGPT account/workspace with custom MCP Connector / Developer Mode access.
-3. One-time Connector setup and pairing for the target workspace.
+Give Codex this prompt:
 
-A Cloudflare account or custom domain is **not required**. Quick Tunnel is the simplest default. A Cloudflare-managed domain is optional when you want a stable address.
+```text
+Install and fully configure ChatX for the current project:
+https://github.com/Tyr1onX/ChatX
 
-## Recommended: let your AI Agent configure ChatX
+Read skill/SKILL.md and follow the first-time setup workflow.
+Handle local installation, workspace selection, Bridge, cloudflared, Cloudflare connectivity, chatx setup, diagnostics, and verification yourself.
+Only ask me to act when a login, authorization, OAuth step, CAPTCHA/2FA, or explicit consent genuinely requires me.
 
-If you use Codex, Claude Code, Cursor Agent, or another local terminal-capable agent, give it the repository and ask it to continue through the actual ChatGPT Connector and end-to-end workspace verification rather than stopping after package installation.
+For ChatGPT, use only the verified path:
+Settings → Plugins → New plugin → Server URL → paste the URL produced by ChatX → Authentication: OAuth → create and finish authorization/pairing.
+Do not send me to Developer Mode and do not infer an alternative MCP setup path from my plan.
 
-- Codex: read `skill/SKILL.md`
-- Other agents: read `docs/agent-setup.md`
+Finish only after ChatGPT can read the real current workspace.
+Do not modify project business code just to install ChatX.
+```
 
-## Manual install
+Other terminal-capable agents should read [docs/agent-setup.md](docs/agent-setup.md) and follow the same verified path.
+
+## What the user actually needs to do
+
+During a normal first-time setup, user interaction should be limited to actions that cannot be reliably delegated:
+
+1. **Cloudflare login / authorization**, only when the selected connection requires it.
+2. **ChatGPT plugin creation / OAuth**, using the MCP Server URL produced by ChatX.
+
+In ChatGPT, use:
+
+```text
+Settings
+→ Plugins
+→ New plugin
+→ Connection: Server URL
+→ paste the URL from ChatX
+→ Authentication: OAuth
+→ acknowledge the custom MCP warning
+→ Create
+→ finish authorization / pairing
+```
+
+Do not use Developer Mode as a prerequisite and do not look for a separate setup route under Advanced Settings or Security.
+
+Then verify with a read-only request such as:
+
+```text
+List the top-level files in the current ChatX workspace. Do not modify anything.
+```
+
+The setup is complete only when the result comes from the real local workspace.
+
+## Cloudflare connection
+
+Cloudflare Quick Tunnel is the default simple path:
+
+- no custom domain required
+- easiest to start
+- the public address may change after a restart or reconnect
+
+If the user already has a Cloudflare-managed domain and wants a stable address, the Agent can configure a Named Tunnel. The user should only be involved for login / authorization when required.
+
+## Advanced: manual install
+
+Use this only when no AI Agent is available.
 
 Windows dependencies:
 
@@ -75,7 +125,13 @@ Then, inside the target project:
 chatx setup
 ```
 
-Add the MCP address produced by `chatx setup` to the matching ChatGPT Connector and complete pairing. A final read-only check should confirm ChatGPT can see the real target workspace.
+Copy the MCP Server URL from `chatx setup`, then create a ChatGPT plugin through:
+
+```text
+Settings → Plugins → New plugin → Server URL → OAuth
+```
+
+Paste the URL, create the plugin, and complete authorization / pairing.
 
 > macOS testers should not use `alpha.1` to judge the new browser support. Follow [docs/macos-smoke.md](docs/macos-smoke.md) and test current `main` until the next prerelease is public.
 

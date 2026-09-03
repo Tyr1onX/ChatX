@@ -2,7 +2,7 @@
 
 这份清单用于真实 Mac 用户验证 ChatX 的完整链路。
 
-ChatX 的 macOS 代码已经通过 GitHub `macos-latest` 上的 Node 20 / 22 自动测试，并且 CI 已真实启动 ChatX 独立浏览器完成页面 Smoke。项目维护者目前没有实体 Mac，因此 **Cloudflare + ChatGPT Connector + 本地 Workspace 的真实用户端到端结果仍需要社区确认**。
+ChatX 的 macOS 代码已经通过 GitHub `macos-latest` 上的 Node 20 / 22 自动测试，并且 CI 已真实启动 ChatX 独立浏览器完成页面 Smoke。项目维护者目前没有实体 Mac，因此 **Cloudflare + ChatGPT 插件 + 本地 Workspace 的真实用户端到端结果仍需要社区确认**。
 
 ## 当前安装方式
 
@@ -34,7 +34,7 @@ chatx --version
 - Node.js 版本
 - ChatX 版本
 - Browser：Chrome / Edge / Chromium / Chrome Canary
-- Tunnel：Quick / Named
+- Cloudflare：Quick / Named
 
 ## 1. 安装系统依赖
 
@@ -65,26 +65,34 @@ printf "hello from macOS\n" > hello.txt
 chatx setup
 ```
 
-建议第一次先使用 Quick Tunnel。
+建议第一次先使用 Cloudflare Quick。
 
 确认：
 
 - Bridge 能正常启动
-- 能得到公网 MCP 地址
+- 能得到公网 MCP Server URL
 - 能得到配对信息
 - 没有异常挂起或重复进程
 
-## 4. ChatGPT Connector
+## 4. ChatGPT 插件
 
-在支持自定义 MCP Connector / Developer Mode 的 ChatGPT 账号中，为这个测试 Workspace 添加 Connector，并使用 `chatx setup` 输出的地址完成配对。
-
-如果账号本身没有该能力，请记录：
+只使用已经验证过的 ChatGPT 接入路线：
 
 ```text
-BLOCKED BY CHATGPT ACCOUNT CAPABILITY
+设置
+→ 插件
+→ 新插件
+→ 连接选择「服务器 URL」
+→ 粘贴 chatx setup 输出的 MCP Server URL
+→ 身份验证选择「OAuth」
+→ 勾选风险确认
+→ 创建
+→ 完成授权 / 配对
 ```
 
-这不算 ChatX macOS 失败。
+**不要把 Developer Mode 当作前置条件，不要到 Advanced Settings / Security 中寻找另一套 MCP 接入路线。**
+
+如果当前 ChatGPT 界面确实没有「插件 → 新插件」入口，请记录实际界面状态并反馈为 ChatGPT UI compatibility blocker，不要改走未验证路线。
 
 ## 5. Workspace 只读验证
 
@@ -161,8 +169,8 @@ chatx doctor
 - 源码安装 / 构建成功
 - CLI 正常
 - Bridge 后台运行正常
-- Cloudflare Tunnel 正常
-- ChatGPT Connector / 配对正常
+- Cloudflare 正常
+- ChatGPT 插件 / OAuth / 配对正常
 - Workspace 读取正常
 - Git 正常
 - 本地进程正常
@@ -179,13 +187,13 @@ macOS:
 Node:
 ChatX:
 Browser:
-Tunnel: Quick / Named
-ChatGPT custom MCP available: Yes / No
+Cloudflare: Quick / Named
+ChatGPT Plugins → New plugin available: Yes / No
 
 Install: PASS / FAIL
 Bridge: PASS / FAIL
-Tunnel: PASS / FAIL
-Connector: PASS / FAIL / BLOCKED
+Cloudflare: PASS / FAIL
+ChatGPT plugin: PASS / FAIL / BLOCKED
 Workspace read: PASS / FAIL
 Git: PASS / FAIL
 Process: PASS / FAIL
