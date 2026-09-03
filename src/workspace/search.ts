@@ -104,11 +104,6 @@ async function searchWithRipgrep(
     let truncated = false;
     const rl = readline.createInterface({ input: child.stdout });
     rl.on("line", (line) => {
-      if (matches.length >= limit) {
-        truncated = true;
-        child.kill("SIGTERM");
-        return;
-      }
       try {
         const event = JSON.parse(line) as {
           type: string;
@@ -117,6 +112,11 @@ async function searchWithRipgrep(
         if (event.type !== "match" || !event.data?.path?.text) return;
         const rel = path.relative(ws.root, event.data.path.text).split(path.sep).join("/");
         if (rel.startsWith("..") || ws.ignoreRules.isHidden(rel)) return;
+        if (matches.length >= limit) {
+          truncated = true;
+          child.kill("SIGTERM");
+          return;
+        }
         matches.push({
           path: rel,
           line: event.data.line_number ?? 0,
@@ -181,11 +181,11 @@ async function searchWithNode(
           const line = lines[i];
           const hit = matcher ? matcher.test(line) : line.toLowerCase().includes(needle);
           if (hit) {
-            matches.push({ path: childRel, line: i + 1, text: line.trimEnd().slice(0, 500) });
             if (matches.length >= limit) {
               truncated = true;
               return;
             }
+            matches.push({ path: childRel, line: i + 1, text: line.trimEnd().slice(0, 500) });
           }
         }
       }
