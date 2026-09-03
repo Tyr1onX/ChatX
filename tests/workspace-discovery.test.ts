@@ -53,4 +53,16 @@ describe("workspace file discovery", () => {
       cleanup(root);
     }
   });
+
+  it("rejects excessively long glob patterns before traversal", async () => {
+    const root = makeTmpDir("find-files-pattern-bound");
+    try {
+      write(root, "safe.txt", "x\n");
+      const workspace = new Workspace(root);
+      await expect(findWorkspaceFiles(workspace, { pattern: "a".repeat(513) }))
+        .rejects.toMatchObject({ code: "INVALID_PATH" });
+    } finally {
+      cleanup(root);
+    }
+  });
 });
