@@ -3,7 +3,7 @@
 **A local capability bridge for ChatGPT.** ChatX runs on your computer and lets ChatGPT work with an authorized local workspace, Git, local processes, and a dedicated browser through MCP.
 
 > **Latest public release:** `v0.1.0-alpha.1`  
-> `main` is now the `v0.1.0-alpha.2` candidate and contains the first macOS support pass. Until that prerelease is published, macOS testers should use the source-install path in [docs/macos-smoke.md](docs/macos-smoke.md).
+> `main` is now the `v0.1.0-alpha.2` candidate and contains the first macOS support pass. Real ChatGPT end-to-end installation has now been verified on both Windows and macOS. Until the next prerelease is published, macOS users should still use the source-install path in [docs/macos-smoke.md](docs/macos-smoke.md).
 
 [中文](README.md) · [AI Agent setup](docs/agent-setup.md) · [Troubleshooting](docs/troubleshooting.md) · [Security](docs/security.md)
 
@@ -11,8 +11,8 @@
 
 | Platform | Status |
 | --- | --- |
-| Windows | Verified in real use and CI |
-| macOS | Source verified on GitHub macOS Node 20/22 CI, including a real dedicated-browser launch smoke; real Mac + ChatGPT end-to-end community smoke still requested |
+| Windows | Real ChatGPT end-to-end use and CI verified |
+| macOS | Real Mac + ChatGPT end-to-end installation verified; Node 20/22 CI and dedicated-browser smoke verified |
 | Linux | Core CI verified; real desktop end-to-end coverage is still limited |
 
 macOS uses the same ChatX codebase as Windows. Browser discovery supports Google Chrome, Microsoft Edge, Chromium, and Chrome Canary in standard macOS locations. Use `CHATX_BROWSER_BIN` for a non-standard executable path.
@@ -133,7 +133,7 @@ Settings → Plugins → New plugin → Server URL → OAuth
 
 Paste the URL, create the plugin, and complete authorization / pairing.
 
-> macOS testers should not use `alpha.1` to judge the new browser support. Follow [docs/macos-smoke.md](docs/macos-smoke.md) and test current `main` until the next prerelease is public.
+> `alpha.1` does not include the current macOS browser-support changes. macOS users should follow [docs/macos-smoke.md](docs/macos-smoke.md) and use current `main` until the next prerelease is public.
 
 ## Maintenance
 
@@ -152,6 +152,10 @@ Use `chatx doctor` first when the connection needs repair.
 ChatX has strong local capabilities. Only connect trusted AI clients and only expose workspaces you intend to authorize. Local processes run with the permissions of the current OS account; ChatX is not a full host sandbox.
 
 See [docs/security.md](docs/security.md) for the complete boundary.
+
+## Origin
+
+ChatX evolved from [XiaoDuoYa/codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt) and retains the original project's MIT license and contributor copyright notice. ChatX continues that foundation with local write/execute capabilities, a dedicated browser, cross-platform support, connection lifecycle work, and user-focused setup.
 
 ## More documentation
 
