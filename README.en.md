@@ -2,11 +2,23 @@
 
 **A local capability bridge for ChatGPT.** ChatX runs on your computer and exposes a bounded set of workspace, Git, process, and dedicated-browser capabilities through MCP.
 
-> **Alpha:** `v0.1.0-alpha.1` is intended for technical testers. Cloudflare transport is the production-tested path. OpenAI Secure MCP Tunnel support is implemented and locally verified, but availability of the ChatGPT-side Tunnel connection UI depends on the account/workspace.
+> **Alpha:** `v0.1.0-alpha.2` is intended for technical testers. Cloudflare transport is the production-tested path. OpenAI Secure MCP Tunnel support is implemented and locally verified, but availability of the ChatGPT-side Tunnel connection UI depends on the account/workspace.
 
 > **ChatGPT access:** installing ChatX does not itself enable custom MCP in ChatGPT. Connector / Developer Mode / Tunnel availability depends on the ChatGPT plan, workspace policy, and current OpenAI product rollout. Cloudflare can provide the network path, but the ChatGPT account still needs permission to add/use the connector.
 
 [中文文档](README.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
+
+## Platform status
+
+| Platform | Status |
+| --- | --- |
+| Windows | Verified in real use and CI |
+| macOS | Code paths and CI verified; real Mac + ChatGPT end-to-end community smoke still requested |
+| Linux | Core CI verified; real desktop end-to-end coverage is still limited |
+
+macOS uses the same npm package as Windows. Dedicated-browser discovery supports Google Chrome, Microsoft Edge, Chromium, and Chrome Canary in standard macOS application locations. Set `CHATX_BROWSER_BIN` when the browser executable is installed elsewhere.
+
+Real Mac testers can follow [docs/macos-smoke.md](docs/macos-smoke.md).
 
 ## What ChatX does
 
@@ -119,11 +131,11 @@ corepack pnpm audit --prod
 corepack pnpm release:smoke
 ```
 
-CI runs on Windows and Ubuntu with Node.js 20 and 22.
+CI runs on Windows, macOS, and Ubuntu with Node.js 20 and 22.
 
 ## Project status
 
-`v0.1.0-alpha.1` focuses on making the existing working bridge safe to distribute: ChatX branding, transport abstraction, narrower capabilities, truthful security documentation, deterministic packaging, cross-platform CI, and release smoke tests.
+`v0.1.0-alpha.2` adds the first macOS support pass, macOS CI, platform-aware browser discovery, and a real-device compatibility smoke path while keeping Windows behavior and the existing transport/security model intact.
 
 **Unofficial community project. Not affiliated with or endorsed by OpenAI or Cloudflare.**
 
