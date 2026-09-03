@@ -1,8 +1,8 @@
 # macOS Compatibility Smoke
 
-这份清单用于真实 Mac 用户验证 ChatX 的完整链路。
+这份清单用于真实 Mac 用户继续验证 ChatX 的完整链路。
 
-ChatX 的 macOS 代码已经通过 GitHub `macos-latest` 上的 Node 20 / 22 自动测试，并且 CI 已真实启动 ChatX 独立浏览器完成页面 Smoke。项目维护者目前没有实体 Mac，因此 **Cloudflare + ChatGPT 插件 + 本地 Workspace 的真实用户端到端结果仍需要社区确认**。
+ChatX 的 macOS 代码已经通过 GitHub `macos-latest` 上的 Node 20 / 22 自动测试，CI 也已真实启动 ChatX 独立浏览器完成页面 Smoke。现在已有社区真实 Mac 成功完成安装并跑通 ChatGPT 连接，因此 macOS 不再处于“仅 CI、等待首个实机结果”的状态；这份清单继续用于扩大不同硬件、系统版本和浏览器组合的覆盖。
 
 ## 当前安装方式
 
