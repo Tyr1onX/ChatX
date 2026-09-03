@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { NOISE_PATTERNS } from "./ignore.js";
+import { compileWorkspaceGlob } from "./glob.js";
 import { Workspace } from "./manager.js";
 
 export interface SearchOptions {
@@ -92,7 +93,8 @@ async function searchWithRipgrep(
   rgBin: string,
   searchAbs: string,
   opts: SearchOptions,
-  limit: number
+  limit: number,
+  globRegex: RegExp | null
 ): Promise<SearchResult> {
   const searchRel = path.relative(ws.root, searchAbs).split(path.sep).join("/");
   if (searchRel && (ws.ignoreRules.isNoise(searchRel) || ws.ignoreRules.isNoise(`${searchRel}/`))) {
@@ -102,7 +104,6 @@ async function searchWithRipgrep(
   const args = ["--no-config", "--json", "--max-filesize", "2M", "--hidden", "--no-ignore"];
   if (!opts.regex) args.push("-F");
   args.push("--smart-case");
-  if (opts.glob) args.push("-g", opts.glob);
   for (const customIgnore of ws.ignoreRules.unchangedCustomIgnoreFiles()) {
     args.push("--ignore-file", customIgnore);
   }
@@ -129,6 +130,7 @@ async function searchWithRipgrep(
         if (event.type !== "match" || !event.data?.path?.text) return;
         const rel = path.relative(ws.root, event.data.path.text).split(path.sep).join("/");
         if (rel.startsWith("..") || ws.ignoreRules.isHidden(rel)) return;
+        if (globRegex && !globRegex.test(rel)) return;
         if (matches.length >= limit) {
           truncated = true;
           terminatedForLimit = true;
@@ -163,12 +165,12 @@ async function searchWithNode(
   ws: Workspace,
   searchAbs: string,
   opts: SearchOptions,
-  limit: number
+  limit: number,
+  globRegex: RegExp | null
 ): Promise<SearchResult> {
   const caseSensitive = opts.query !== opts.query.toLowerCase();
   const matcher = opts.regex ? new RegExp(opts.query, caseSensitive ? "" : "i") : null;
   const needle = caseSensitive ? opts.query : opts.query.toLowerCase();
-  const globRegex = opts.glob ? globToRegex(opts.glob) : null;
   const matches: SearchMatch[] = [];
   let truncated = false;
 
@@ -337,15 +339,7 @@ async function attachSearchContext(
 }
 
 export function globToRegex(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]]/g, "\\$&")
-    .replace(/\*\*\//g, "\u0000")
-    .replace(/\*\*/g, "\u0001")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, "[^/]")
-    .replace(/\u0000/g, "(?:.*/)?")
-    .replace(/\u0001/g, ".*");
-  return new RegExp(`(^|/)${escaped}$`);
+  return compileWorkspaceGlob(glob).regex;
 }
 
 export async function searchWorkspace(ws: Workspace, opts: SearchOptions): Promise<SearchResult> {
@@ -359,17 +353,18 @@ export async function searchWorkspace(ws: Workspace, opts: SearchOptions): Promi
       contextAfter
     );
   }
+  const globRegex = opts.glob ? compileWorkspaceGlob(opts.glob).regex : null;
   const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
   const { abs } = ws.resolve(opts.path ?? ".");
   const rg = findRipgrep();
   if (rg) {
     try {
-      const result = await searchWithRipgrep(ws, rg, abs, opts, limit);
+      const result = await searchWithRipgrep(ws, rg, abs, opts, limit, globRegex);
       return attachSearchContext(ws, result, contextBefore, contextAfter);
     } catch {
       // fall through to node engine
     }
   }
-  const result = await searchWithNode(ws, abs, opts, limit);
+  const result = await searchWithNode(ws, abs, opts, limit, globRegex);
   return attachSearchContext(ws, result, contextBefore, contextAfter);
 }
