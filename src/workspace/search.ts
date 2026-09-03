@@ -155,8 +155,9 @@ async function searchWithNode(
   opts: SearchOptions,
   limit: number
 ): Promise<SearchResult> {
-  const matcher = opts.regex ? new RegExp(opts.query, "i") : null;
-  const needle = opts.query.toLowerCase();
+  const caseSensitive = opts.query !== opts.query.toLowerCase();
+  const matcher = opts.regex ? new RegExp(opts.query, caseSensitive ? "" : "i") : null;
+  const needle = caseSensitive ? opts.query : opts.query.toLowerCase();
   const globRegex = opts.glob ? globToRegex(opts.glob) : null;
   const matches: SearchMatch[] = [];
   let truncated = false;
@@ -181,7 +182,11 @@ async function searchWithNode(
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const hit = matcher ? matcher.test(line) : line.toLowerCase().includes(needle);
+      const hit = matcher
+        ? matcher.test(line)
+        : caseSensitive
+          ? line.includes(needle)
+          : line.toLowerCase().includes(needle);
       if (!hit) continue;
       if (matches.length >= limit) {
         truncated = true;
