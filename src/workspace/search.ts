@@ -45,6 +45,7 @@ const MAX_CONTEXT_LINES = 3;
 const MAX_CONTEXT_BYTES = 128 * 1024;
 const MAX_CONTEXT_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_CONTEXT_LINE_CHARS = 500;
+const MAX_RG_ERROR_CHARS = 4096;
 
 const RG_CANDIDATES = [
   "rg",
@@ -102,7 +103,13 @@ async function searchWithRipgrep(
     const child = spawn(rgBin, args, { cwd: ws.root, windowsHide: true });
     const matches: SearchMatch[] = [];
     let truncated = false;
+    let terminatedForLimit = false;
+    let stderr = "";
     const rl = readline.createInterface({ input: child.stdout });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      if (stderr.length >= MAX_RG_ERROR_CHARS) return;
+      stderr = (stderr + chunk.toString()).slice(0, MAX_RG_ERROR_CHARS);
+    });
     rl.on("line", (line) => {
       try {
         const event = JSON.parse(line) as {
@@ -114,6 +121,7 @@ async function searchWithRipgrep(
         if (rel.startsWith("..") || ws.ignoreRules.isHidden(rel)) return;
         if (matches.length >= limit) {
           truncated = true;
+          terminatedForLimit = true;
           child.kill("SIGTERM");
           return;
         }
@@ -127,7 +135,15 @@ async function searchWithRipgrep(
       }
     });
     child.on("error", reject);
-    child.on("close", () => {
+    child.on("close", (code, signal) => {
+      if (!terminatedForLimit && code !== 0 && code !== 1) {
+        const detail = stderr.trim();
+        reject(new Error(
+          `ripgrep search failed${code !== null ? ` with exit code ${code}` : signal ? ` with signal ${signal}` : ""}` +
+          (detail ? `: ${detail}` : "")
+        ));
+        return;
+      }
       resolvePromise({ matches, matchCount: matches.length, truncated, engine: "ripgrep" });
     });
   });

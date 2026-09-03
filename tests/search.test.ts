@@ -43,7 +43,10 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  delete process.env.CHATX_DISABLE_RG;
   delete process.env.C2C_DISABLE_RG;
+  delete process.env.CHATX_RG_PATH;
+  delete process.env.C2C_RG_PATH;
   resetRipgrepCache();
 });
 
@@ -67,6 +70,15 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(paths).toContain("README.md");
     const authMatch = result.matches.find((match) => match.path === "src/auth.ts");
     expect(authMatch?.line).toBe(1);
+  });
+
+  it("treats no matches as a normal result", async () => {
+    configure();
+    const result = await searchWorkspace(ws, { query: "needle-that-does-not-exist" });
+    expect(result.engine).toBe(engine);
+    expect(result.matches).toEqual([]);
+    expect(result.matchCount).toBe(0);
+    expect(result.truncated).toBe(false);
   });
 
   it("never returns sensitive or noise files", async () => {
@@ -165,4 +177,17 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(result.maxContextBytes).toBe(128 * 1024);
     expect(result.matches.every((match) => match.text.includes("needle-context-budget"))).toBe(true);
   });
+});
+
+it("falls back to the Node engine when the configured ripgrep process fails", async () => {
+  process.env.CHATX_RG_PATH = process.execPath;
+  resetRipgrepCache();
+
+  const result = await searchWorkspace(ws, { query: "needle-alpha", path: "src/auth.ts" });
+
+  expect(result.engine).toBe("node");
+  expect(result.matches).toEqual([
+    { path: "src/auth.ts", line: 1, text: "export function login() { return 'needle-alpha'; }" },
+  ]);
+  expect(result.truncated).toBe(false);
 });
