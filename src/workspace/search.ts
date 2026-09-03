@@ -101,9 +101,7 @@ async function searchWithRipgrep(
     return { matches: [], matchCount: 0, truncated: false, engine: "ripgrep" };
   }
 
-  const args = ["--no-config", "--json", "--max-filesize", "2M", "--hidden", "--no-ignore"];
-  if (!opts.regex) args.push("-F");
-  args.push("--smart-case");
+  const args = ["--no-config", "--json", "--max-filesize", "2M", "--hidden", "--no-ignore", "-F", "--smart-case"];
   for (const customIgnore of ws.ignoreRules.unchangedCustomIgnoreFiles()) {
     args.push("--ignore-file", customIgnore);
   }
@@ -192,7 +190,7 @@ async function searchWithNode(
       return;
     }
     if (content.includes("\0")) return;
-    const lines = content.split("\n");
+    const lines = content.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const hit = matcher
@@ -357,6 +355,15 @@ export async function searchWorkspace(ws: Workspace, opts: SearchOptions): Promi
   const globRegex = opts.glob ? compileWorkspaceGlob(opts.glob).regex : null;
   const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
   const { abs } = ws.resolve(opts.path ?? ".");
+
+  // Regex search deliberately uses one engine everywhere. Delegating regex syntax
+  // to ripgrep would make results depend on whether ripgrep is installed because
+  // Rust regex and JavaScript RegExp are different languages.
+  if (opts.regex) {
+    const result = await searchWithNode(ws, abs, opts, limit, globRegex);
+    return attachSearchContext(ws, result, contextBefore, contextAfter);
+  }
+
   const rg = findRipgrep();
   if (rg) {
     try {
