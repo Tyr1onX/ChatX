@@ -32,9 +32,9 @@ function assertMutablePath(rel: string, operation: string): void {
   }
 }
 
-async function statIfExists(abs: string): Promise<fs.Stats | null> {
+async function lstatIfExists(abs: string): Promise<fs.Stats | null> {
   try {
-    return await fs.promises.stat(abs);
+    return await fs.promises.lstat(abs);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -48,17 +48,23 @@ function mutationFailure(error: unknown): WorkspaceMutationError {
   );
 }
 
+function resolveMutationPath(workspace: Workspace, requestedPath: string): { abs: string; rel: string } {
+  return workspace.resolve(requestedPath, { preserveLeafSymlink: true });
+}
+
 export async function createWorkspaceDirectory(
   workspace: Workspace,
   requestedPath: string,
   opts: { parents?: boolean } = {}
 ): Promise<{ path: string; created: boolean }> {
-  const target = workspace.resolve(requestedPath);
+  const target = resolveMutationPath(workspace, requestedPath);
   assertMutablePath(target.rel, "Creating a directory");
 
-  const existing = await statIfExists(target.abs);
+  const existing = await lstatIfExists(target.abs);
   if (existing) {
-    if (existing.isDirectory()) return { path: target.rel, created: false };
+    if (existing.isDirectory() && !existing.isSymbolicLink()) {
+      return { path: target.rel, created: false };
+    }
     throw new WorkspaceMutationError("PATH_EXISTS", `A non-directory path already exists: ${target.rel}`);
   }
 
@@ -75,17 +81,17 @@ export async function moveWorkspacePath(
   sourcePath: string,
   destinationPath: string,
   opts: { createParents?: boolean } = {}
-): Promise<{ source: string; destination: string; type: "file" | "directory" }> {
-  const source = workspace.resolve(sourcePath);
-  const destination = workspace.resolve(destinationPath);
+): Promise<{ source: string; destination: string; type: "file" | "directory" | "symlink" }> {
+  const source = resolveMutationPath(workspace, sourcePath);
+  const destination = resolveMutationPath(workspace, destinationPath);
   assertMutablePath(source.rel, "Moving a path");
   assertMutablePath(destination.rel, "Moving a path");
 
-  const sourceStat = await statIfExists(source.abs);
+  const sourceStat = await lstatIfExists(source.abs);
   if (!sourceStat) {
     throw new WorkspaceError("FILE_NOT_FOUND", `Path not found: ${source.rel}`);
   }
-  const destinationStat = await statIfExists(destination.abs);
+  const destinationStat = await lstatIfExists(destination.abs);
   if (destinationStat) {
     throw new WorkspaceMutationError("PATH_EXISTS", `Destination already exists: ${destination.rel}`);
   }
@@ -111,7 +117,11 @@ export async function moveWorkspacePath(
   return {
     source: source.rel,
     destination: destination.rel,
-    type: sourceStat.isDirectory() ? "directory" : "file",
+    type: sourceStat.isSymbolicLink()
+      ? "symlink"
+      : sourceStat.isDirectory()
+        ? "directory"
+        : "file",
   };
 }
 
@@ -119,18 +129,18 @@ export async function deleteWorkspacePath(
   workspace: Workspace,
   requestedPath: string,
   opts: { recursive?: boolean } = {}
-): Promise<{ path: string; type: "file" | "directory"; recursive: boolean }> {
-  const target = workspace.resolve(requestedPath);
+): Promise<{ path: string; type: "file" | "directory" | "symlink"; recursive: boolean }> {
+  const target = resolveMutationPath(workspace, requestedPath);
   assertMutablePath(target.rel, "Deleting a path");
 
-  const stat = await statIfExists(target.abs);
+  const stat = await lstatIfExists(target.abs);
   if (!stat) {
     throw new WorkspaceError("FILE_NOT_FOUND", `Path not found: ${target.rel}`);
   }
 
   const recursive = opts.recursive ?? false;
   try {
-    if (stat.isDirectory()) {
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
       if (recursive) {
         await fs.promises.rm(target.abs, { recursive: true, force: false });
       } else {
@@ -157,7 +167,11 @@ export async function deleteWorkspacePath(
 
   return {
     path: target.rel,
-    type: stat.isDirectory() ? "directory" : "file",
+    type: stat.isSymbolicLink()
+      ? "symlink"
+      : stat.isDirectory()
+        ? "directory"
+        : "file",
     recursive,
   };
 }
