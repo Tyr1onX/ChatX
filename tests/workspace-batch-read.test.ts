@@ -53,7 +53,7 @@ describe("workspace batch reads", () => {
 
       const result = await readWorkspaceFiles(
         workspace,
-        Array.from({ length: 6 }, (_, i) => ({ path: `large-${i}.txt` }))
+        Array.from({ length: 6 }, (_, i) => ({ path: `large-${i}.txt`, endLine: 1500 }))
       );
 
       expect(result.totalContentBytes).toBeLessThanOrEqual(result.maxTotalContentBytes);
