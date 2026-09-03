@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Make the repository README Chinese-first and add a complete install, connection, verification, and troubleshooting path for end users.
+
+### Security
+
+- Override the transitive `qs` dependency to `>=6.16.0` to pick up the patched release required by the production dependency audit.
+
 ## v0.1.0-alpha.1 — 2026-09-02
 
 First ChatX public alpha preparation.
