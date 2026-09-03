@@ -117,9 +117,15 @@ export class Workspace {
 
   /**
    * Resolve an untrusted path to a canonical absolute path inside the workspace.
+   * For mutation operations, preserveLeafSymlink keeps the final path component
+   * lexical while still canonicalizing its parent, so moving/deleting a symlink
+   * acts on the link itself without weakening parent symlink escape protection.
    * Throws PATH_OUTSIDE_WORKSPACE or ACCESS_DENIED_SENSITIVE_FILE.
    */
-  resolve(requested: string, opts: { allowSensitive?: boolean } = {}): { abs: string; rel: string } {
+  resolve(
+    requested: string,
+    opts: { allowSensitive?: boolean; preserveLeafSymlink?: boolean } = {}
+  ): { abs: string; rel: string } {
     if (typeof requested !== "string" || requested.includes("\0")) {
       throw new WorkspaceError("INVALID_PATH", "Invalid path");
     }
@@ -132,7 +138,9 @@ export class Workspace {
     if (p === "") p = ".";
 
     const abs = path.resolve(this.root, p);
-    const canonical = this.canonicalize(abs);
+    const canonical = opts.preserveLeafSymlink && abs !== this.root
+      ? path.join(this.canonicalize(path.dirname(abs)), path.basename(abs))
+      : this.canonicalize(abs);
     if (!this.contains(canonical)) {
       throw new WorkspaceError(
         "PATH_OUTSIDE_WORKSPACE",
