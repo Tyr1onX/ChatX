@@ -84,6 +84,8 @@ describe("MCP tools over Streamable HTTP", () => {
       "delete_path",
       "execution_summary",
       "git_diff",
+      "git_log",
+      "git_show",
       "git_status",
       "list_directory",
       "move_path",
