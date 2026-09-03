@@ -14,12 +14,12 @@ ChatX is a local capability bridge. ChatGPT can inspect the workspace and, when 
 **Golden rules**
 
 1. NEVER paste file contents, diffs, or logs into ChatGPT. ChatGPT reads them through MCP.
-2. NEVER show the user technical internals (MCP, OAuth, PKCE, tunnel, ports, localhost).
-   Speak in terms of "连接 ChatGPT / 安全连接 / 配对".
+2. NEVER show the user technical internals (MCP, PKCE, tunnel, ports, localhost).
+   Speak in terms of "连接 ChatGPT / 安全连接 / 配对 / OAuth 授权".
 3. The pairing code is the ONLY credential you may ever type into a browser.
    Never touch OAuth tokens, cookies, or session storage.
 4. If something fails, run `chatx doctor` and repair silently. Only involve the user
-   for logins, CAPTCHA, 2FA, or explicit consent screens — and then give them ONE action.
+   for logins, CAPTCHA, 2FA, OAuth / explicit consent screens — and then give them ONE action.
 5. ALWAYS use the built-in in-app browser (iab) for every ChatGPT step.
    Follow **In-app browser (ChatGPT)** below. NEVER Computer Use (no
    screenshot-click). NEVER launch or control a third-party/external browser
@@ -42,15 +42,18 @@ ChatX is a local capability bridge. ChatGPT can inspect the workspace and, when 
      conversation opens a new chat from the Project collection page — never
      `goto` `https://chatgpt.com/` to create it, and never reuse another
      Codex conversation's chat URL just because `session.url` exists.
-   Each workspace also has exactly ONE ChatGPT connector. Do not create a
+   Each workspace also has exactly ONE ChatGPT connector/plugin. Do not create a
    second connector for the same workspace. Other workspaces may have their
    own connectors — never edit those.
 7. After first-time setup, never ask the user to approve writing ChatX's local
    settings directory. Run `chatx sandbox-allow --json` (idempotent). If it fails
    with EPERM / Operation not permitted, request elevated permissions and retry
    ONCE. After `{ "alreadyAllowed": true }` or `{ "added": true }`, stay silent.
-8. ChatGPT pages: only the URLs in **In-app browser (ChatGPT)**. Never start
-   from chatgpt.com and click through menus.
+8. ChatGPT pages: only the URLs in **In-app browser (ChatGPT)**. Never hunt through
+   unrelated settings. The verified ChatGPT setup route is always Plugins → New
+   plugin → Server URL → OAuth. **Never use Developer Mode as a prerequisite,
+   never send the user to Advanced Settings / Security for MCP setup, and never
+   infer an alternative route from the user's ChatGPT plan.**
 9. **Doctor gate.** After `chatx doctor --json`, do not `goto` ChatGPT and do not
    send `[C2C]` until local is green — except the reconnect settings pages when
    `chatgptRepair.needed` is true. Not green:
@@ -88,7 +91,6 @@ that close the tab, hide the window, or stall on the settings page.
    marked (standby). Do not let default turn cleanup close it.
 
 4. **URLs only** (same tab, `goto` — never hunt menus):
-   - 开发人员模式: `https://chatgpt.com/#settings/Security`
    - 插件总管: `https://chatgpt.com/plugins`
    - 加插件: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
    - 新对话 (long-chat only, and only if no saved chat): `https://chatgpt.com/`
@@ -209,9 +211,7 @@ Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
    `connectorName` is this workspace's plugin title (legacy installs keep their saved connector title; new workspaces use `ChatX · <name>`).
    Pairing codes expire in ~5 minutes: run `chatx pair --json` for a fresh one if you're slow.
 4. Open ChatGPT on the ONE iab tab (see **In-app browser**). Foreground +
-   markHandoff immediately. Same tab, `goto` only:
-   - 开发人员模式: `https://chatgpt.com/#settings/Security`
-     Enable 开发人员模式 ("Developer mode") if it is off.
+   markHandoff immediately. Use ONLY the verified plugin path:
    - 已有该 `connectorName`: `https://chatgpt.com/plugins` — Delete it (never
      Reconnect). Then `goto` the 加插件 URL below.
    - 还没有 / 刚删掉: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
@@ -221,11 +221,16 @@ Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
       - If it does not exist: create one with that exact name.
       - Never rename, delete, or edit a connector that belongs to another workspace.
       - Description: `Securely connect ChatGPT to the current Codex workspace for planning and review.`
+      - Connection: Server URL
       - Server URL: the `mcpUrl` from step 3
       - Authentication: OAuth
-     Fill the known form in one script when you can. Then Connect / Authorize
-     and type the pairing code. As soon as it shows Connected / authorized /
-     pairing accepted, continue — do NOT wait for 8 tools on this page.
+      - Acknowledge the custom MCP risk checkbox if shown.
+     Fill the known form in one script when you can. Then Create / Connect /
+     Authorize and type the pairing code. As soon as it shows Connected /
+     authorized / pairing accepted, continue — do NOT wait for 8 tools on this page.
+   **Never visit Developer Mode / Advanced Settings / Security as part of setup.**
+   If the current ChatGPT UI does not expose the verified New plugin form, stop
+   and report the actual UI incompatibility instead of inventing another setup route.
 5. Same tab: open the first C2C chat per **Conversation management**
    (Project collection for a new workspace; `https://chatgpt.com/` only
    in long-chat). Confirm Chat mode per **In-app browser** §7 (if it is Work,
@@ -249,8 +254,8 @@ ChatX
 Ready.
 ```
 
-If a login wall appears (ChatGPT, Cloudflare): stop, tell the user the ONE thing
-to do ("请登录 ChatGPT，完成后告诉我'好了'"), then continue.
+If a login wall appears (ChatGPT, Cloudflare) or an OAuth / consent screen
+requires the user's confirmation: stop, tell the user the ONE thing to do, then continue.
 
 ## Conversation management
 
@@ -485,14 +490,15 @@ the previous public address is gone. Doctor already started a new one.
 `{ "chatgptRepair": { "needed": true, "connectorAction": "update", "connectorName": "...", "userMessage": "...", "mcpUrl": "...", "pairingCode": "...", "pages": { ... } } }`
 
 1. Tell the user exactly `chatgptRepair.userMessage`. Then you repair. Do not
-   ask them to click around ChatGPT unless a login wall appears. Do not open
-   the C2C chat and do not send `[C2C]` until this repair finishes and a
-   follow-up doctor is green. Never "try a message first to see if it works".
-2. Same one iab tab as setup (foreground + markHandoff). Settings URLs only
-   until Connected — never hunt menus:
-   - 开发人员模式: `https://chatgpt.com/#settings/Security`
+   ask them to click around ChatGPT unless a login / OAuth / explicit consent
+   screen requires them. Do not open the C2C chat and do not send `[C2C]` until
+   this repair finishes and a follow-up doctor is green. Never "try a message
+   first to see if it works".
+2. Same one iab tab as setup (foreground + markHandoff). Use only the verified
+   plugin route until Connected:
    - 插件总管（只用来 Delete）: `https://chatgpt.com/plugins`
    - 加插件（Delete 之后必走）: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
+   Never visit Developer Mode / Advanced Settings / Security for this workflow.
 3. Operate ONLY on `chatgptRepair.connectorName`. Never touch another
    workspace's connector.
    - If that exact name exists on the plugins hub: **Delete** it. Confirm the
@@ -502,9 +508,11 @@ the previous public address is gone. Doctor already started a new one.
    - Then `goto` the 加插件 URL and create that **same** `connectorName`
      (do not invent a second name):
       - Description: `Securely connect ChatGPT to the current Codex workspace for planning and review.`
+      - Connection: Server URL
       - Server URL: `chatgptRepair.mcpUrl`
       - Authentication: OAuth
-     Then Connect / Authorize and type `chatgptRepair.pairingCode`
+      - Acknowledge the custom MCP risk checkbox if shown.
+     Then Create / Connect / Authorize and type `chatgptRepair.pairingCode`
      (or `chatx pair --json` if it expired). Continue as soon as it is Connected —
      do not wait for 8 tools on the settings page.
    - If the name is already gone, skip Delete and only create.
@@ -529,14 +537,14 @@ the previous public address is gone. Doctor already started a new one.
 3. If `chatgptRepair.needed`, follow **reconnect after address reclaim**, then
    doctor again.
 4. Otherwise apply the recovery map. Only involve the user for login / 2FA /
-   CAPTCHA — one action.
+   CAPTCHA / OAuth / explicit consent — one action.
 
 ## Recovery map
 
 | Symptom | Action |
 | --- | --- |
 | Bridge not running | `chatx start` (doctor does this automatically) |
-| Tunnel dead / URL unreachable / 全关掉后连接失效 | `chatx doctor` → if `namedRepair.needed`, login to Cloudflare and doctor again (do not Delete). If `chatgptRepair.needed`, tell the user the message, then **Delete** THIS workspace's connector only (`connectorName`) and create it again. Never Reconnect. |
+| Tunnel dead / URL unreachable / 全关掉后连接失效 | `chatx doctor` → if `namedRepair.needed`, login to Cloudflare and doctor again (do not Delete). If `chatgptRepair.needed`, tell the user the message, then **Delete** THIS workspace's connector only (`connectorName`) and create it again through New plugin → Server URL → OAuth. Never Reconnect. |
 | ChatGPT says tool call failed / 401 | token expired or revoked → re-pair (new pairing code + authorize) |
 | Pairing code rejected/expired | `chatx pair --json` for a fresh code |
 | Port conflict | handled automatically; never surface to the user |
