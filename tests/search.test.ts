@@ -9,6 +9,7 @@ const globMarker = "C2C_GLOB_MARKER";
 
 beforeAll(() => {
   root = makeTmpDir("search-ws");
+  write(root, ".chatxignore", "ignored-search/\n");
   write(root, "src/auth.ts", "export function login() { return 'needle-alpha'; }\n");
   write(root, "src/deep/nested.ts", `// needle-alpha appears here too\n${globMarker}\n`);
   write(root, "src/root.ts", `${globMarker}\n`);
@@ -21,6 +22,8 @@ beforeAll(() => {
   write(root, "README.md", "This project contains needle-alpha documentation.\n");
   write(root, ".env", "NEEDLE-ALPHA=secret\n");
   write(root, "node_modules/pkg/index.js", "needle-alpha in dependencies\n");
+  write(root, "exact-limit.txt", "needle-exact-limit\n".repeat(10));
+  write(root, "ignored-search/hidden.txt", "needle-exact-limit\n");
   for (let i = 0; i < 30; i++) {
     write(root, `many/file-${i}.txt`, "needle-beta\nneedle-beta\n");
   }
@@ -74,11 +77,21 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(paths.some((p) => p.includes("node_modules"))).toBe(false);
   });
 
-  it("respects the limit", async () => {
+  it("respects the limit when an additional safe match exists", async () => {
     configure();
     const result = await searchWorkspace(ws, { query: "needle-beta", limit: 10 });
-    expect(result.matches.length).toBeLessThanOrEqual(10);
+    expect(result.matches.length).toBe(10);
+    expect(result.matchCount).toBe(10);
     expect(result.truncated).toBe(true);
+  });
+
+  it("does not report truncation when safe matches exactly equal the limit", async () => {
+    configure();
+    const result = await searchWorkspace(ws, { query: "needle-exact-limit", limit: 10 });
+    expect(result.matches).toHaveLength(10);
+    expect(result.matchCount).toBe(10);
+    expect(result.matches.every((match) => match.path === "exact-limit.txt")).toBe(true);
+    expect(result.truncated).toBe(false);
   });
 
   it("supports glob filters", async () => {
