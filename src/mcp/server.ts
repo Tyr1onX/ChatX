@@ -9,6 +9,7 @@ import { latestExecutionRecord, readExecutionRecords } from "../execution/record
 import type { Logger } from "../logger/index.js";
 import { PRODUCT_NAME, VERSION } from "../version.js";
 import type { BrowserController } from "../browser/controller.js";
+import { ProcessSessionError, type ProcessSessionManager } from "../process/session-manager.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 
@@ -36,7 +37,11 @@ function fail(code: string, message: string): ToolResult {
 }
 
 function mapError(error: unknown): ToolResult {
-  if (error instanceof WorkspaceError || error instanceof WorkspacePatchError) {
+  if (
+    error instanceof WorkspaceError ||
+    error instanceof WorkspacePatchError ||
+    error instanceof ProcessSessionError
+  ) {
     return fail(error.code, error.message);
   }
   return fail("INTERNAL_ERROR", error instanceof Error ? error.message : String(error));
@@ -66,10 +71,11 @@ export interface McpContext {
   workspace: Workspace;
   logger: Logger;
   browser?: BrowserController;
+  processes: ProcessSessionManager;
 }
 
 export function createMcpServer(ctx: McpContext): McpServer {
-  const { workspace, browser } = ctx;
+  const { workspace, browser, processes } = ctx;
   const server = new McpServer(
     { name: PRODUCT_NAME, version: VERSION },
     { capabilities: { tools: {} }, instructions: UNTRUSTED_NOTE }
@@ -239,6 +245,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       description:
         `Run one local executable with argument array in the connected workspace. The command is not ` +
         `run through a shell. Output is capped and the process is terminated on timeout. ` +
+        `Use process_start for servers, watchers, REPLs, and other commands that must stay alive. ` +
         `This is a broad fallback capability: prefer structured workspace/git/browser tools when they fit. ` +
         `This is a direct local-control operation; use only when the user explicitly requested it.`,
       inputSchema: {
@@ -275,6 +282,120 @@ export function createMcpServer(ctx: McpContext): McpServer {
       } catch (error) {
         return fail("COMMAND_FAILED", error instanceof Error ? error.message : String(error));
       }
+    }
+  );
+
+  server.registerTool(
+    "process_start",
+    {
+      title: "Start managed local process",
+      description:
+        `Start a local process that may stay alive across MCP calls, such as a dev server, watcher, ` +
+        `REPL, debugger, or long-running test command. The working directory must stay inside the ` +
+        `workspace. Use process_read for output and process_stop when finished.`,
+      inputSchema: {
+        command: z.string().min(1).describe("Executable name or path"),
+        args: z.array(z.string()).max(100).default([]).describe("Process arguments"),
+        cwd: z.string().default(".").describe("Workspace-relative working directory"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
+      if (denied) return denied;
+      try {
+        return ok(await processes.start({ command: args.command, args: args.args, cwd: args.cwd }));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "process_read",
+    {
+      title: "Read managed process output",
+      description:
+        `Read bounded stdout/stderr from a managed process. Reuse nextOffset values on later calls ` +
+        `to consume only new output. If truncatedBefore is true, older buffered output has already ` +
+        `been discarded.`,
+      inputSchema: {
+        process_id: z.string().min(1),
+        stdout_offset: z.number().int().min(0).optional(),
+        stderr_offset: z.number().int().min(0).optional(),
+        max_chars: z.number().int().min(1).max(65536).default(16384),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
+      if (denied) return denied;
+      try {
+        return ok(processes.read(args.process_id, {
+          stdoutOffset: args.stdout_offset,
+          stderrOffset: args.stderr_offset,
+          maxChars: args.max_chars,
+        }));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "process_write",
+    {
+      title: "Write managed process input",
+      description: "Write text to a running managed process stdin, optionally closing stdin afterwards.",
+      inputSchema: {
+        process_id: z.string().min(1),
+        text: z.string().max(65536),
+        end_stdin: z.boolean().default(false),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
+      if (denied) return denied;
+      try {
+        return ok(processes.write(args.process_id, args.text, args.end_stdin));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "process_stop",
+    {
+      title: "Stop managed local process",
+      description: "Request termination of a managed process. Calling it again after exit is harmless.",
+      inputSchema: { process_id: z.string().min(1) },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
+      if (denied) return denied;
+      try {
+        return ok(processes.stop(args.process_id));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "process_list",
+    {
+      title: "List managed local processes",
+      description: "List running and recently completed managed process sessions for this workspace.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (_args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "process.run");
+      if (denied) return denied;
+      return ok({ processes: processes.list() });
     }
   );
 
