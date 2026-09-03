@@ -8,9 +8,23 @@ ChatX 是一个运行在你电脑上的本地桥接器。连接完成后，ChatG
 
 [English](README.en.md) · [AI Agent 安装说明](docs/agent-setup.md) · [排障](docs/troubleshooting.md) · [安全说明](docs/security.md)
 
-> 当前版本：`v0.1.0-alpha.1`。ChatX 仍处于 Alpha 阶段。
+> 当前版本：`v0.1.0-alpha.2`。ChatX 仍处于 Alpha 阶段。
 >
 > ChatX 不会绕过 ChatGPT 本身的产品权限。如果你的账号 / 工作区没有自定义 MCP Connector、Developer Mode 或对应 Tunnel 能力，本机安装成功后 ChatGPT 仍可能无法连接。
+
+## 平台支持
+
+| 平台 | 当前状态 |
+| --- | --- |
+| Windows | ✅ 已完成真实环境使用与自动 CI 验证 |
+| macOS | 🧪 已支持代码路径与 GitHub Actions 自动验证，等待真实 Mac + ChatGPT 端到端社区 Smoke |
+| Linux | 🧪 核心功能有自动 CI 验证，真实桌面端到端验证仍有限 |
+
+macOS 与 Windows 使用同一个 npm 包，不需要单独下载“Mac 版”。ChatX 会自动使用对应系统的状态目录、命令和浏览器路径。
+
+macOS 独立浏览器目前会自动查找 Google Chrome、Microsoft Edge、Chromium 和 Chrome Canary；如果安装在非标准位置，可以设置 `CHATX_BROWSER_BIN` 指向浏览器可执行文件。
+
+如果你有 Mac 并愿意帮忙验证完整链路，请参考 [macOS Compatibility Smoke](docs/macos-smoke.md)。
 
 ## 它能做什么？
 
@@ -166,7 +180,7 @@ brew install node cloudflared
 #### 2. 安装 ChatX
 
 ```bash
-npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
+npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.2/chatx-local-bridge-0.1.0-alpha.2.tgz
 ```
 
 确认：
@@ -253,6 +267,7 @@ ChatX 可以获得较强的本机能力，因此请只把它连接到你信任�
 ## 更多文档
 
 - [给 AI Agent 的安装说明](docs/agent-setup.md)
+- [macOS Compatibility Smoke](docs/macos-smoke.md)
 - [排障](docs/troubleshooting.md)
 - [安全模型](docs/security.md)
 - [架构](docs/architecture.md)

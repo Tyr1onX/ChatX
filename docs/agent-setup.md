@@ -156,6 +156,8 @@ Linux 使用适合当前发行版的 Cloudflare 官方安装方式。
 
 安装后重新确认命令可用。
 
+如果用户要使用 ChatX 的独立浏览器能力，还需要本机安装受支持的 Chromium 系浏览器。macOS 会自动查找 Google Chrome、Microsoft Edge、Chromium 和 Chrome Canary；非标准安装位置可以设置 `CHATX_BROWSER_BIN` 为浏览器可执行文件的绝对路径。
+
 ## 2. 安装 ChatX
 
 普通用户优先安装公开 Release，不要为了使用 ChatX 去 clone 源码和建立开发环境。
@@ -163,13 +165,13 @@ Linux 使用适合当前发行版的 Cloudflare 官方安装方式。
 当前公开版本：
 
 ```text
-v0.1.0-alpha.1
+v0.1.0-alpha.2
 ```
 
 安装：
 
 ```bash
-npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
+npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.2/chatx-local-bridge-0.1.0-alpha.2.tgz
 ```
 
 验证：
@@ -181,7 +183,7 @@ chatx --version
 预期：
 
 ```text
-0.1.0-alpha.1
+0.1.0-alpha.2
 ```
 
 如果机器已经安装 ChatX，不要无条件重复安装。先确认版本与运行状态。
