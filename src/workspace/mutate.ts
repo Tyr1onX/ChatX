@@ -20,7 +20,7 @@ export class WorkspaceMutationError extends Error {
 }
 
 function protectedPath(rel: string): boolean {
-  return rel === "" || rel === ".git" || rel.startsWith(".git/");
+  return rel === "" || rel.split("/").includes(".git");
 }
 
 function assertMutablePath(rel: string, operation: string): void {
