@@ -117,6 +117,16 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(paths).not.toContain("README.md");
   });
 
+  it("searches a single file path consistently", async () => {
+    configure();
+    const result = await searchWorkspace(ws, { query: "needle-alpha", path: "src/auth.ts" });
+    expect(result.engine).toBe(engine);
+    expect(result.matches).toEqual([
+      { path: "src/auth.ts", line: 1, text: "export function login() { return 'needle-alpha'; }" },
+    ]);
+    expect(result.truncated).toBe(false);
+  });
+
   it("returns bounded context around each match when requested", async () => {
     configure();
     const result = await searchWorkspace(ws, {
