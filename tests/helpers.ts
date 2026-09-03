@@ -24,6 +24,26 @@ export function cleanup(dir: string): void {
   }
 }
 
+export async function withWindowsCommandShim<T>(
+  command: string,
+  output: string,
+  run: () => Promise<T>
+): Promise<T> {
+  const dir = makeTmpDir("windows-command-shim");
+  const pathKey = Object.keys(process.env).find((name) => name.toLowerCase() === "path") ?? "PATH";
+  const previousPath = process.env[pathKey];
+  write(dir, `${command}.cmd`, `@echo off\r\necho ${output}\r\n`);
+  process.env[pathKey] = previousPath ? `${dir}${path.delimiter}${previousPath}` : dir;
+
+  try {
+    return await run();
+  } finally {
+    if (previousPath === undefined) delete process.env[pathKey];
+    else process.env[pathKey] = previousPath;
+    cleanup(dir);
+  }
+}
+
 export function write(dir: string, rel: string, content: string): string {
   const file = path.join(dir, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });

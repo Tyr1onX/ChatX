@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Workspace } from "../src/workspace/manager.js";
 import { ProcessSessionManager } from "../src/process/session-manager.js";
-import { cleanup, makeTmpDir } from "./helpers.js";
+import { cleanup, makeTmpDir, withWindowsCommandShim } from "./helpers.js";
 
 async function waitFor(
   check: () => boolean,
@@ -109,22 +109,24 @@ describe("ProcessSessionManager", () => {
   it("starts the pnpm command shim on Windows", async () => {
     if (process.platform !== "win32") return;
 
-    const root = makeTmpDir("process-pnpm-windows");
-    const manager = new ProcessSessionManager(new Workspace(root));
-    try {
-      const started = await manager.start({
-        command: "pnpm",
-        args: ["--version"],
-      });
-      await waitFor(() => manager.read(started.id).process.status !== "running");
+    await withWindowsCommandShim("pnpm", "9.99.99-test", async () => {
+      const root = makeTmpDir("process-pnpm-windows");
+      const manager = new ProcessSessionManager(new Workspace(root));
+      try {
+        const started = await manager.start({
+          command: "pnpm",
+          args: ["--version"],
+        });
+        await waitFor(() => manager.read(started.id).process.status !== "running");
 
-      const result = manager.read(started.id);
-      expect(result.process.exitCode).toBe(0);
-      expect(result.stdout.text.trim()).toMatch(/^\d+\.\d+\.\d+/);
-    } finally {
-      await manager.closeAll();
-      cleanup(root);
-    }
+        const result = manager.read(started.id);
+        expect(result.process.exitCode).toBe(0);
+        expect(result.stdout.text.trim()).toBe("9.99.99-test");
+      } finally {
+        await manager.closeAll();
+        cleanup(root);
+      }
+    });
   });
 
   it("closeAll terminates running sessions and forgets them", async () => {
