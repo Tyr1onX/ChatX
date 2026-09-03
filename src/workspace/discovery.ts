@@ -5,6 +5,7 @@ import { globToRegex } from "./search.js";
 
 const DEFAULT_FIND_LIMIT = 100;
 const MAX_FIND_LIMIT = 500;
+const MAX_PATTERN_LENGTH = 512;
 const MAX_SCANNED_ENTRIES = 100_000;
 
 export interface FindFilesOptions {
@@ -48,6 +49,9 @@ export async function findWorkspaceFiles(
   }
 
   const pattern = opts.pattern?.trim() || "**/*";
+  if (pattern.length > MAX_PATTERN_LENGTH) {
+    throw new WorkspaceError("INVALID_PATH", `File glob pattern exceeds ${MAX_PATTERN_LENGTH} characters.`);
+  }
   const matcher = globToRegex(pattern);
   const limit = Math.min(MAX_FIND_LIMIT, Math.max(1, Math.floor(opts.limit ?? DEFAULT_FIND_LIMIT)));
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
