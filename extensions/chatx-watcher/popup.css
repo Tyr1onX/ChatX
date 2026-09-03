@@ -2,31 +2,41 @@
   color-scheme: light dark;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   min-width: 280px;
   background: Canvas;
   color: CanvasText;
 }
-main {
+
+.status-view {
   padding: 16px;
 }
+
 h1 {
   margin: 0 0 14px;
   font-size: 17px;
   font-weight: 650;
 }
+
 .toggle {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 14px;
 }
+
 .status {
   margin-top: 14px;
   border-top: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
   padding-top: 10px;
 }
+
 .status div {
   display: flex;
   justify-content: space-between;
@@ -34,10 +44,110 @@ h1 {
   padding: 5px 0;
   font-size: 13px;
 }
+
 .status span {
   opacity: 0.65;
 }
+
 .status strong {
   font-weight: 600;
   text-align: right;
+}
+
+body.completion-mode {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.completion-view {
+  padding: 10px 12px 11px;
+}
+
+.completion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 20px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.dismiss {
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.dismiss:hover {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+  opacity: 0.9;
+}
+
+.completion-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 61px;
+  margin-top: 4px;
+}
+
+.character {
+  width: 58px;
+  margin: 0;
+  flex: 0 0 58px;
+  white-space: pre;
+  overflow: visible;
+  font: 12px/1.08 Consolas, "Cascadia Mono", monospace;
+  opacity: 0.86;
+}
+
+.completion-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.completion-summary {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.conversation-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+.view-conversation {
+  width: 100%;
+  height: 29px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, CanvasText 7%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.view-conversation:hover {
+  background: color-mix(in srgb, CanvasText 11%, transparent);
+}
+
+.view-conversation:disabled {
+  cursor: default;
+  opacity: 0.5;
 }

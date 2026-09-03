@@ -9,11 +9,6 @@
     ],
     generationControl: [
       'button[data-testid="stop-button"]',
-      'button[data-testid*="stop" i]',
-      'button[aria-label*="stop" i]',
-      'button[aria-label*="停止"]',
-      'button[aria-label*="cancel" i]',
-      'button[aria-label*="取消"]',
     ],
     generationBusy: [
       '[data-testid*="thinking" i][aria-busy="true"]',

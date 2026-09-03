@@ -38,6 +38,12 @@ export function getCurrentRun(state, conversationId) {
   return runId ? getRun(state, runId) : null;
 }
 
+export function getPendingDoneRuns(state) {
+  return state.runs
+    .filter((run) => run.state === RunState.DONE)
+    .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
+}
+
 function mergeMetadata(run, metadata) {
   if (metadata.tabId !== undefined) run.tabId = metadata.tabId;
   if (metadata.windowId !== undefined) run.windowId = metadata.windowId;
@@ -71,7 +77,7 @@ export function startRun(state, metadata, now, runId) {
     lastMutationAt: metadata.lastMutationAt ?? now,
     completedAt: null,
     acknowledgedAt: null,
-    notifiedAt: null,
+    presentedAt: null,
     tabId: metadata.tabId ?? null,
     windowId: metadata.windowId ?? null,
     url: metadata.url ?? "",
@@ -126,7 +132,7 @@ export function canConfirmFinish(run, signals, now) {
 export function confirmDone(state, runId, metadata, now) {
   const run = getRun(state, runId);
   if (!canConfirmFinish(run, metadata.signals, now)) {
-    return { run, completed: false, shouldNotify: false };
+    return { run, completed: false, shouldPresent: false };
   }
 
   run.state = RunState.DONE;
@@ -134,13 +140,10 @@ export function confirmDone(state, runId, metadata, now) {
   run.lastMutationAt = metadata.lastMutationAt ?? run.lastMutationAt;
   mergeMetadata(run, metadata);
 
-  // Reserve notification delivery before the side effect. This deliberately
-  // favors "never notify the same run twice" over automatic retry after a
-  // platform notification failure.
-  const shouldNotify = run.notifiedAt == null;
-  if (shouldNotify) run.notifiedAt = now;
+  const shouldPresent = run.presentedAt == null;
+  if (shouldPresent) run.presentedAt = now;
 
-  return { run, completed: true, shouldNotify };
+  return { run, completed: true, shouldPresent };
 }
 
 export function acknowledgeRun(state, conversationId, now) {

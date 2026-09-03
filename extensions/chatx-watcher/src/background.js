@@ -4,22 +4,22 @@ import {
   cleanupWatcherState,
   confirmDone,
   createEmptyWatcherState,
+  getPendingDoneRuns,
   markFinishCandidate,
   normalizeWatcherState,
   recordActivity,
   startRun,
 } from "./state.js";
-import {
-  BrowserNotificationSink,
-  notificationIdForRun,
-  runIdFromNotificationId,
-} from "./notifications.js";
 
 const STATE_KEY = "watcherState";
 const SETTINGS_KEY = "settings";
-const notificationSink = new BrowserNotificationSink();
+const COMPLETION_POPUP_URL = chrome.runtime.getURL("popup.html?completion=1");
+const COMPLETION_POPUP_WIDTH = 340;
+const COMPLETION_POPUP_HEIGHT = 168;
+
 let stateCache = null;
 let writeQueue = Promise.resolve();
+let popupCreatePromise = null;
 
 async function loadState() {
   if (stateCache) return stateCache;
@@ -49,6 +49,53 @@ function withSenderMetadata(message, sender) {
 async function isEnabled() {
   const stored = await chrome.storage.local.get({ [SETTINGS_KEY]: { enabled: true } });
   return stored[SETTINGS_KEY]?.enabled !== false;
+}
+
+async function getCompletionPopupWindow() {
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup"] });
+  return (
+    windows.find((windowInfo) =>
+      windowInfo.tabs?.some((tab) => tab.url === COMPLETION_POPUP_URL)
+    ) ?? null
+  );
+}
+
+async function refreshCompletionPopup() {
+  try {
+    await chrome.runtime.sendMessage({ type: "COMPLETION_UPDATED" });
+  } catch {
+    // No completion popup is currently open.
+  }
+}
+
+async function showCompletionPopup() {
+  if (popupCreatePromise) {
+    await popupCreatePromise;
+    await refreshCompletionPopup();
+    return;
+  }
+
+  popupCreatePromise = (async () => {
+    const existing = await getCompletionPopupWindow();
+    if (existing) {
+      await refreshCompletionPopup();
+      return;
+    }
+
+    await chrome.windows.create({
+      url: COMPLETION_POPUP_URL,
+      type: "popup",
+      width: COMPLETION_POPUP_WIDTH,
+      height: COMPLETION_POPUP_HEIGHT,
+      focused: false,
+    });
+  })();
+
+  try {
+    await popupCreatePromise;
+  } finally {
+    popupCreatePromise = null;
+  }
 }
 
 async function handleRunStarted(message, sender) {
@@ -116,24 +163,26 @@ async function handleFinishConfirmed(message, sender) {
   cleanupWatcherState(state, Date.now());
   await persistState();
 
-  if (result.shouldNotify && result.run) {
-    await notificationSink.emitCompletion({
-      conversationId: result.run.conversationId,
-      runId: result.run.runId,
-      title: result.run.title,
-      url: result.run.url,
-      tabId: result.run.tabId,
-      windowId: result.run.windowId,
-      completedAt: result.run.completedAt,
-    });
+  if (result.shouldPresent) {
+    await showCompletionPopup();
   }
 
   return {
     completed: true,
     runId: result.run?.runId ?? null,
     state: result.run?.state ?? null,
-    notified: result.shouldNotify,
+    presented: result.shouldPresent,
   };
+}
+
+async function acknowledgeConversation(conversationId) {
+  const state = await loadState();
+  const result = acknowledgeRun(state, conversationId, Date.now());
+  if (result.acknowledged) {
+    await persistState();
+    await refreshCompletionPopup();
+  }
+  return result;
 }
 
 async function handleAcknowledge(message, sender) {
@@ -150,16 +199,7 @@ async function handleAcknowledge(message, sender) {
   }
   if (!windowInfo.focused) return { acknowledged: false };
 
-  const state = await loadState();
-  const result = acknowledgeRun(state, metadata.conversationId, Date.now());
-  if (result.acknowledged) {
-    await persistState();
-    await Promise.allSettled(
-      (result.runIds ?? []).map((runId) =>
-        chrome.notifications.clear(notificationIdForRun(runId))
-      )
-    );
-  }
+  const result = await acknowledgeConversation(metadata.conversationId);
   return {
     acknowledged: result.acknowledged,
     runId: result.run?.runId ?? null,
@@ -174,7 +214,7 @@ async function registerConversation() {
 async function getStatus() {
   const state = await loadState();
   const tabs = await chrome.tabs.query({ url: ["https://chatgpt.com/*"] });
-  const completed = state.runs.filter((run) => run.state === RunState.DONE).length;
+  const completed = getPendingDoneRuns(state).length;
   const running = state.runs.filter(
     (run) => run.state === RunState.RUNNING || run.state === RunState.FINISH_CANDIDATE
   ).length;
@@ -184,6 +224,17 @@ async function getStatus() {
     watchedTabs: tabs.length,
     completed,
     running,
+  };
+}
+
+async function getCompletionData() {
+  const state = await loadState();
+  const pending = getPendingDoneRuns(state);
+  const first = pending[0] ?? null;
+  return {
+    count: pending.length,
+    runId: first?.runId ?? null,
+    title: first?.title?.trim() || "ChatGPT 对话",
   };
 }
 
@@ -197,6 +248,57 @@ async function setEnabled(enabled) {
       .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "CONFIG_CHANGED", enabled: settings.enabled }))
   );
   return settings;
+}
+
+async function focusConversation(run) {
+  let tab = null;
+  if (run.tabId != null) {
+    try {
+      tab = await chrome.tabs.get(run.tabId);
+    } catch {
+      tab = null;
+    }
+  }
+
+  if (!tab && run.url) {
+    const matches = await chrome.tabs.query({ url: ["https://chatgpt.com/*"] });
+    tab = matches.find((item) => item.url === run.url) ?? null;
+  }
+
+  if (!tab && run.url) {
+    tab = await chrome.tabs.create({ url: run.url, active: true });
+  } else if (tab?.id != null) {
+    if (run.url && tab.url !== run.url) {
+      tab = await chrome.tabs.update(tab.id, { url: run.url, active: true });
+    } else {
+      tab = await chrome.tabs.update(tab.id, { active: true });
+    }
+  }
+
+  if (tab?.windowId != null) {
+    await chrome.windows.update(tab.windowId, { focused: true });
+  }
+
+  return tab;
+}
+
+async function handleViewPendingCompletion() {
+  const state = await loadState();
+  const run = getPendingDoneRuns(state)[0] ?? null;
+  if (!run) return { viewed: false, acknowledged: false, remaining: 0 };
+
+  const tab = await focusConversation(run);
+  if (!tab) {
+    return { viewed: false, acknowledged: false, remaining: getPendingDoneRuns(state).length };
+  }
+
+  const result = await acknowledgeConversation(run.conversationId);
+  return {
+    viewed: true,
+    acknowledged: result.acknowledged,
+    runId: run.runId,
+    remaining: getPendingDoneRuns(state).length,
+  };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -213,9 +315,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "ACK_ELIGIBLE":
         return handleAcknowledge(message, sender);
       case "REGISTER_CONVERSATION":
-        return registerConversation(message, sender);
+        return registerConversation();
       case "GET_STATUS":
         return getStatus();
+      case "GET_COMPLETION_DATA":
+        return getCompletionData();
+      case "VIEW_PENDING_COMPLETION":
+        return handleViewPendingCompletion();
       case "SET_ENABLED":
         return setEnabled(message.enabled);
       default:
@@ -246,48 +352,6 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     .query({ active: true, windowId })
     .then((tabs) => requestAckCheck(tabs[0]?.id))
     .catch(() => undefined);
-});
-
-chrome.notifications.onClicked.addListener((notificationId) => {
-  const runId = runIdFromNotificationId(notificationId);
-  if (!runId) return;
-
-  void (async () => {
-    const state = await loadState();
-    const run = state.runs.find((item) => item.runId === runId);
-    if (!run) return;
-
-    let tab = null;
-    if (run.tabId != null) {
-      try {
-        tab = await chrome.tabs.get(run.tabId);
-      } catch {
-        tab = null;
-      }
-    }
-
-    if (!tab && run.url) {
-      const matches = await chrome.tabs.query({ url: ["https://chatgpt.com/*"] });
-      tab = matches.find((item) => item.url === run.url) ?? null;
-    }
-
-    if (!tab && run.url) {
-      tab = await chrome.tabs.create({ url: run.url, active: true });
-    } else if (tab?.id != null) {
-      if (run.url && tab.url !== run.url) {
-        tab = await chrome.tabs.update(tab.id, { url: run.url, active: true });
-      } else {
-        tab = await chrome.tabs.update(tab.id, { active: true });
-      }
-    }
-
-    if (tab?.windowId != null) {
-      await chrome.windows.update(tab.windowId, { focused: true });
-    }
-
-    await chrome.notifications.clear(notificationId);
-    await requestAckCheck(tab?.id);
-  })();
 });
 
 chrome.runtime.onInstalled.addListener(() => {

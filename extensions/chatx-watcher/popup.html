@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <main>
+  <main id="status-view" class="status-view">
     <h1>ChatX Watcher</h1>
     <label class="toggle">
       <input id="enabled" type="checkbox">
@@ -19,6 +19,24 @@
       <div><span>已完成</span><strong id="completed">0</strong></div>
     </section>
   </main>
+
+  <main id="completion-view" class="completion-view" hidden>
+    <header class="completion-header">
+      <strong>ChatX</strong>
+      <button id="dismiss" class="dismiss" type="button" aria-label="关闭">×</button>
+    </header>
+    <section class="completion-body" aria-live="polite">
+      <pre id="character" class="character" aria-hidden="true">[._.]
+ /|\
+ / \</pre>
+      <div class="completion-copy">
+        <div id="completion-summary" class="completion-summary">ChatGPT 已完成</div>
+        <div id="conversation-title" class="conversation-title">ChatGPT 对话</div>
+      </div>
+    </section>
+    <button id="view-conversation" class="view-conversation" type="button">查看</button>
+  </main>
+
   <script src="popup.js"></script>
 </body>
 </html>

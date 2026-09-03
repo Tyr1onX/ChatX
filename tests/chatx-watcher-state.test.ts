@@ -7,6 +7,7 @@ import {
   canEnterFinishCandidate,
   confirmDone,
   createEmptyWatcherState,
+  getPendingDoneRuns,
   markFinishCandidate,
   recordActivity,
   reduceIgnoredUiEvent,
@@ -59,14 +60,14 @@ function completeRun(state, runId, startedAt = 1000) {
 }
 
 describe("ChatX Watcher run state machine", () => {
-  it("CASE 1: RUNNING -> stable -> DONE notifies exactly once", () => {
+  it("CASE 1: RUNNING -> stable -> DONE requests popup exactly once", () => {
     const state = createEmptyWatcherState();
     const started = startRun(state, baseMetadata, 1000, "run-1");
     expect(started.run.state).toBe(RunState.RUNNING);
 
     const first = completeRun(state, "run-1");
     expect(first.completed).toBe(true);
-    expect(first.shouldNotify).toBe(true);
+    expect(first.shouldPresent).toBe(true);
     expect(first.run?.state).toBe(RunState.DONE);
 
     const second = confirmDone(
@@ -76,7 +77,7 @@ describe("ChatX Watcher run state machine", () => {
       9000
     );
     expect(second.completed).toBe(false);
-    expect(second.shouldNotify).toBe(false);
+    expect(second.shouldPresent).toBe(false);
   });
 
   it("CASE 2: DOM rerender after DONE cannot create a duplicate completion", () => {
@@ -121,7 +122,7 @@ describe("ChatX Watcher run state machine", () => {
     expect(acknowledgeRun(state, "conversation-a", 9000).acknowledged).toBe(false);
   });
 
-  it("CASE 5: a genuine new generation creates a new run and can notify", () => {
+  it("CASE 5: a genuine new generation creates a new run and can request a new popup", () => {
     const state = createEmptyWatcherState();
     startRun(state, baseMetadata, 1000, "run-1");
     completeRun(state, "run-1");
@@ -132,8 +133,19 @@ describe("ChatX Watcher run state machine", () => {
     expect(next.run.runId).toBe("run-2");
 
     const completed = completeRun(state, "run-2", 9000);
-    expect(completed.shouldNotify).toBe(true);
+    expect(completed.shouldPresent).toBe(true);
     expect(state.runs).toHaveLength(2);
+  });
+
+  it("orders multiple pending completions deterministically without acknowledging on presentation", () => {
+    const state = createEmptyWatcherState();
+    startRun(state, baseMetadata, 1000, "run-1");
+    completeRun(state, "run-1");
+    startRun(state, baseMetadata, 9000, "run-2");
+    completeRun(state, "run-2", 9000);
+
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-1", "run-2"]);
+    expect(state.runs.every((run) => run.state === RunState.DONE)).toBe(true);
   });
 
   it("acknowledges an older DONE run even after a newer run starts", () => {

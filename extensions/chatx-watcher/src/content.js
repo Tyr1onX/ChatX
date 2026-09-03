@@ -28,7 +28,8 @@
     try {
       const parsed = new URL(url);
       const match = parsed.pathname.match(/^\/c\/([^/?#]+)/);
-      return match?.[1] ?? null;
+      const conversationId = match?.[1] ?? null;
+      return conversationId?.startsWith("WEB:") ? null : conversationId;
     } catch {
       return null;
     }
