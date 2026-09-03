@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { NOISE_PATTERNS } from "./ignore.js";
+import { NOISE_PATTERNS, RIPGREP_PREPRUNE_SENSITIVE_PATTERNS } from "./ignore.js";
 import { compileWorkspaceGlob } from "./glob.js";
 import { Workspace } from "./manager.js";
 
@@ -108,6 +108,7 @@ async function searchWithRipgrep(
     args.push("--ignore-file", customIgnore);
   }
   for (const pattern of NOISE_PATTERNS) args.push("-g", `!${pattern}`);
+  for (const pattern of RIPGREP_PREPRUNE_SENSITIVE_PATTERNS) args.push("-g", `!${pattern}`);
   args.push("--", opts.query, searchAbs);
 
   return new Promise((resolvePromise, reject) => {

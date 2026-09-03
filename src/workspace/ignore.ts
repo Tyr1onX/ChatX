@@ -3,13 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Files that must never be readable through MCP, regardless of user config.
- * Matched with gitignore semantics against workspace-relative paths.
+ * Sensitive patterns with no allow-exception semantics. These can be safely
+ * pushed down into ripgrep as traversal exclusions before file contents are read.
+ * The full IgnoreRules policy below remains authoritative.
  */
-export const SENSITIVE_PATTERNS: string[] = [
+export const RIPGREP_PREPRUNE_SENSITIVE_PATTERNS: string[] = [
   ".env",
-  ".env.*",
-  "!.env.example",
   "*.pem",
   "*.key",
   "*.p12",
@@ -40,6 +39,20 @@ export const SENSITIVE_PATTERNS: string[] = [
   "cookies.sqlite",
   "Cookies",
   ".c2c-secrets*",
+];
+
+/**
+ * Files that must never be readable through MCP, regardless of user config.
+ * Matched with gitignore semantics against workspace-relative paths.
+ *
+ * `.env.*` intentionally stays out of the ripgrep pre-prune set because the
+ * policy explicitly allows `.env.example`. It remains protected by the final
+ * IgnoreRules filter without risking an over-broad traversal exclusion.
+ */
+export const SENSITIVE_PATTERNS: string[] = [
+  ...RIPGREP_PREPRUNE_SENSITIVE_PATTERNS,
+  ".env.*",
+  "!.env.example",
 ];
 
 /** High-noise directories excluded from listing/search by default. */
