@@ -74,25 +74,49 @@ export const NOISE_PATTERNS: string[] = [
 
 export const CUSTOM_IGNORE_FILENAMES = [".chatxignore", ".c2cignore"] as const;
 
+interface CustomIgnoreSnapshot {
+  path: string;
+  content: string;
+}
+
 export class IgnoreRules {
   private sensitive: Ignore;
   private noise: Ignore;
   private custom: Ignore;
+  private customSnapshots: CustomIgnoreSnapshot[];
 
   constructor(workspaceRoot: string) {
     this.sensitive = ignore().add(SENSITIVE_PATTERNS);
     this.noise = ignore().add(NOISE_PATTERNS);
     this.custom = ignore();
+    this.customSnapshots = [];
     for (const fileName of CUSTOM_IGNORE_FILENAMES) {
       const customIgnore = path.join(workspaceRoot, fileName);
       try {
         if (fs.existsSync(customIgnore)) {
-          this.custom.add(fs.readFileSync(customIgnore, "utf8"));
+          const content = fs.readFileSync(customIgnore, "utf8");
+          this.custom.add(content);
+          this.customSnapshots.push({ path: customIgnore, content });
         }
       } catch {
         // unreadable custom ignore file: fall back to the remaining rules
       }
     }
+  }
+
+  /**
+   * Custom ignore files that are still byte-for-byte identical to the Workspace
+   * startup snapshot. Callers may use these only as an optimization; the parsed
+   * snapshot above remains authoritative for access and visibility decisions.
+   */
+  unchangedCustomIgnoreFiles(): string[] {
+    return this.customSnapshots.flatMap((snapshot) => {
+      try {
+        return fs.readFileSync(snapshot.path, "utf8") === snapshot.content ? [snapshot.path] : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   /** True when the path must be denied with ACCESS_DENIED_SENSITIVE_FILE. */
