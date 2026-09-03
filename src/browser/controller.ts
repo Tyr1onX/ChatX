@@ -1,20 +1,9 @@
-import fs from "node:fs";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright-core";
 import { getStateDir } from "../config/paths.js";
+import { findBrowserExecutable } from "./executable.js";
 
 const MAX_TEXT = 64 * 1024;
-const CHROME_PATHS = [
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-];
-
-function executablePath(): string {
-  const found = CHROME_PATHS.find((candidate) => fs.existsSync(candidate));
-  if (!found) throw new Error("No supported Chrome or Edge installation was found.");
-  return found;
-}
 
 export class BrowserController {
   private context: BrowserContext | null = null;
@@ -41,7 +30,7 @@ export class BrowserController {
     }
     const profile = path.join(getStateDir(), "browser-profile");
     this.context = await chromium.launchPersistentContext(profile, {
-      executablePath: executablePath(),
+      executablePath: findBrowserExecutable(),
       headless,
       args: ["--disable-extensions"],
       viewport: { width: 1440, height: 900 },
