@@ -42,9 +42,9 @@ export function mcpUrlFromPublic(publicUrl: string | null | undefined): string |
 }
 
 /** What the Skill should do to THIS workspace's ChatGPT connector.
- *  `update` means the public address changed: Delete the old connector
- *  in ChatGPT, then create it again. Never click Reconnect (the old
- *  URL is dead and hangs on "This site cannot be reached"). */
+ *  `update` means the existing connector must be replaced via the verified
+ *  Delete -> New plugin -> OAuth route. The reason can be an address change
+ *  or lost local authorization state. Never click Reconnect on the old card. */
 export function connectorAction(
   previousMcpUrl: string | null | undefined,
   nextMcpUrl: string | null | undefined
@@ -52,6 +52,32 @@ export function connectorAction(
   if (!nextMcpUrl) return "none";
   if (!previousMcpUrl) return "create";
   return normalizePublicUrl(previousMcpUrl) === normalizePublicUrl(nextMcpUrl) ? "none" : "update";
+}
+
+export type ConnectorRepairReason = "address_reclaimed" | "authorization_lost";
+
+export interface ConnectorRepairDecision {
+  action: "none" | "create" | "update";
+  reason?: ConnectorRepairReason;
+}
+
+/**
+ * Decide whether an already-recorded connector must be replaced. URL changes
+ * take precedence. If the URL is unchanged but the bridge no longer has any
+ * live authorization state for a recorded connector, recreate the same
+ * connector at the same URL so OAuth can be established again.
+ */
+export function connectorRepairDecision(
+  previousMcpUrl: string | null | undefined,
+  nextMcpUrl: string | null | undefined,
+  hasAuthorization: boolean
+): ConnectorRepairDecision {
+  const action = connectorAction(previousMcpUrl, nextMcpUrl);
+  if (action === "update") return { action, reason: "address_reclaimed" };
+  if (action === "none" && previousMcpUrl && nextMcpUrl && !hasAuthorization) {
+    return { action: "update", reason: "authorization_lost" };
+  }
+  return { action };
 }
 
 export function sanitizeConnectorLabel(name: string, workspaceId: string): string {
@@ -77,4 +103,8 @@ export function connectorNameFor(opts: {
 
 export function reclaimUserMessage(connectorName: string): string {
   return `当前项目的安全连接地址已经失效。我会删除「${connectorName}」再按新地址加回去，其它项目的连接不动。请稍等。`;
+}
+
+export function reauthorizeUserMessage(connectorName: string): string {
+  return `当前项目的 ChatGPT 授权已经失效，但连接地址仍然正常。我会删除「${connectorName}」再按原地址加回去，只重新完成这一个项目的授权，其它项目的连接不动。`;
 }
