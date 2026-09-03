@@ -51,9 +51,8 @@ ChatX is a local capability bridge. ChatGPT can inspect the workspace and, when 
    ONCE. After `{ "alreadyAllowed": true }` or `{ "added": true }`, stay silent.
 8. ChatGPT pages: only the URLs in **In-app browser (ChatGPT)**. Never hunt through
    unrelated settings. The verified ChatGPT setup route is always Plugins → New
-   plugin → Server URL → OAuth. **Never use Developer Mode as a prerequisite,
-   never send the user to Advanced Settings / Security for MCP setup, and never
-   infer an alternative route from the user's ChatGPT plan.**
+   plugin → Server URL → OAuth. **Use that route only; never infer an alternative
+   setup path from account tier, unrelated settings, or UI guesses.**
 9. **Doctor gate.** After `chatx doctor --json`, do not `goto` ChatGPT and do not
    send `[C2C]` until local is green — except the reconnect settings pages when
    `chatgptRepair.needed` is true. Not green:
@@ -177,7 +176,7 @@ Inside the checkout directory (see Locations):
 ## Connection choice (once per workspace)
 
 Ask this **before** the public address exists (`chatx setup` / first `doctor --fix`
-that starts a tunnel). Do not mention tunnels, wrangler, DNS, or hostnames.
+that starts a tunnel). Do not mention tunnels, DNS, or hostnames.
 Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
 
 1. `chatx tunnel status -w <workspace> --json`
@@ -228,8 +227,7 @@ Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
      Fill the known form in one script when you can. Then Create / Connect /
      Authorize and type the pairing code. As soon as it shows Connected /
      authorized / pairing accepted, continue — do NOT wait for 8 tools on this page.
-   **Never visit Developer Mode / Advanced Settings / Security as part of setup.**
-   If the current ChatGPT UI does not expose the verified New plugin form, stop
+   If current ChatGPT UI does not expose the verified New plugin form, stop
    and report the actual UI incompatibility instead of inventing another setup route.
 5. Same tab: open the first C2C chat per **Conversation management**
    (Project collection for a new workspace; `https://chatgpt.com/` only
@@ -498,7 +496,8 @@ the previous public address is gone. Doctor already started a new one.
    plugin route until Connected:
    - 插件总管（只用来 Delete）: `https://chatgpt.com/plugins`
    - 加插件（Delete 之后必走）: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
-   Never visit Developer Mode / Advanced Settings / Security for this workflow.
+   Stay on these two plugin URLs until the repair is Connected; do not browse
+   unrelated settings or infer another setup route.
 3. Operate ONLY on `chatgptRepair.connectorName`. Never touch another
    workspace's connector.
    - If that exact name exists on the plugins hub: **Delete** it. Confirm the
