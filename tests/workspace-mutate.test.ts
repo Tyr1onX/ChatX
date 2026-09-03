@@ -103,10 +103,12 @@ describe("workspace mutation primitives", () => {
     }
   });
 
-  it("protects workspace root and .git from move/delete", async () => {
+  it("protects workspace root and git metadata at any depth", async () => {
     const root = makeTmpDir("mutate-protected");
     try {
       makeGitRepo(root);
+      fs.mkdirSync(path.join(root, "packages/nested/.git"), { recursive: true });
+      write(root, "packages/nested/.git/config", "protected\n");
       const workspace = new Workspace(root);
 
       await expect(deleteWorkspacePath(workspace, ".", { recursive: true }))
@@ -115,8 +117,15 @@ describe("workspace mutation primitives", () => {
         .rejects.toMatchObject({ code: "PROTECTED_PATH" });
       await expect(moveWorkspacePath(workspace, ".git", "git-backup"))
         .rejects.toMatchObject({ code: "PROTECTED_PATH" });
+      await expect(deleteWorkspacePath(workspace, "packages/nested/.git", { recursive: true }))
+        .rejects.toMatchObject({ code: "PROTECTED_PATH" });
+      await expect(moveWorkspacePath(workspace, "packages/nested/.git/config", "visible-config"))
+        .rejects.toMatchObject({ code: "PROTECTED_PATH" });
+      await expect(createWorkspaceDirectory(workspace, "new-repo/.git/hooks"))
+        .rejects.toMatchObject({ code: "PROTECTED_PATH" });
 
       expect(fs.existsSync(path.join(root, ".git"))).toBe(true);
+      expect(fs.readFileSync(path.join(root, "packages/nested/.git/config"), "utf8")).toBe("protected\n");
     } finally {
       cleanup(root);
     }
