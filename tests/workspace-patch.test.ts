@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { Workspace } from "../src/workspace/manager.js";
-import { applyWorkspacePatch, WorkspacePatchError } from "../src/workspace/patch.js";
+import { applyWorkspacePatch } from "../src/workspace/patch.js";
 import { cleanup, makeTmpDir, write } from "./helpers.js";
 
 describe("workspace patch engine", () => {
@@ -39,7 +39,7 @@ describe("workspace patch engine", () => {
         path: "dup.txt",
         oldText: "same",
         newText: "changed",
-      }])).rejects.toMatchObject<Partial<WorkspacePatchError>>({ code: "PATCH_CONFLICT" });
+      }])).rejects.toMatchObject({ code: "PATCH_CONFLICT" });
 
       expect(fs.readFileSync(path.join(root, "dup.txt"), "utf8")).toBe("same\nsame\n");
     } finally {
@@ -57,7 +57,7 @@ describe("workspace patch engine", () => {
       await expect(applyWorkspacePatch(workspace, [
         { path: "a.txt", oldText: "alpha", newText: "changed-alpha" },
         { path: "b.txt", oldText: "missing", newText: "changed-beta" },
-      ])).rejects.toMatchObject<Partial<WorkspacePatchError>>({ code: "PATCH_CONFLICT" });
+      ])).rejects.toMatchObject({ code: "PATCH_CONFLICT" });
 
       expect(fs.readFileSync(path.join(root, "a.txt"), "utf8")).toBe("alpha\n");
       expect(fs.readFileSync(path.join(root, "b.txt"), "utf8")).toBe("beta\n");
