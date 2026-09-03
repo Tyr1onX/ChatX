@@ -31,12 +31,13 @@ import { ensureSandboxAllowlist, getCodexConfigPath, isStateDirAllowlisted } fro
 import {
   CHATGPT_CREATE_CONNECTOR_URL,
   CHATGPT_PLUGINS_URL,
-  connectorAction,
   connectorNameFor,
+  connectorRepairDecision,
   mcpUrlFromPublic,
   normalizePublicUrl,
   readLastEndpoint,
   reclaimUserMessage,
+  reauthorizeUserMessage,
   writeLastEndpoint,
   type LastEndpoint,
 } from "../config/endpoint.js";
@@ -419,7 +420,6 @@ program
           body: JSON.stringify({ jsonrpc: "2.0", method: "ping", id: 1 }),
         });
         report.mcp = { ok: response.status === 401, detail: `未授权请求返回 ${response.status}` };
-        report.oauth = { ok: response.status === 401 };
       } catch (error) {
         report.mcp = { ok: false, detail: (error as Error).message };
       }
@@ -476,6 +476,14 @@ program
           report.tunnel = { ok: false, detail: (error as Error).message };
         }
       }
+
+      const hasAuthorization = info.tokenCount > 0;
+      report.oauth = lastEndpoint
+        ? hasAuthorization
+          ? { ok: true, detail: `${info.tokenCount} 个有效令牌` }
+          : { ok: false, detail: "本地授权已过期或不存在" }
+        : { ok: true, detail: "尚未记录 ChatGPT 连接" };
+
       const expectedPublic = Boolean(lastEndpoint?.publicUrl) || namedReady;
       let currentUrl = info.publicUrl ?? info.tunnel.url;
       let healthy = false;
@@ -513,7 +521,8 @@ program
       if (currentUrl && healthy) {
         report.tunnel = { ok: true, detail: currentUrl };
         const nextMcp = mcpUrlFromPublic(currentUrl);
-        const action = connectorAction(lastEndpoint?.mcpUrl, nextMcp);
+        const decision = connectorRepairDecision(lastEndpoint?.mcpUrl, nextMcp, hasAuthorization);
+        const action = decision.action;
         const boundName = nextMcp
           ? persistWorkspaceEndpoint({
               workspaceId: info.workspaceId,
@@ -527,10 +536,15 @@ program
         chatgptRepair = {
           ...chatgptRepair,
           needed: action === "update",
-          reason: action === "update" ? "address_reclaimed" : undefined,
+          reason: decision.reason,
           connectorAction: action,
           connectorName: boundName,
-          userMessage: action === "update" ? reclaimUserMessage(boundName) : undefined,
+          userMessage:
+            action === "update"
+              ? decision.reason === "authorization_lost"
+                ? reauthorizeUserMessage(boundName)
+                : reclaimUserMessage(boundName)
+              : undefined,
           mcpUrl: nextMcp,
           previousMcpUrl: lastEndpoint?.mcpUrl ?? null,
         };
@@ -539,7 +553,11 @@ program
             const pairing = await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
             chatgptRepair.pairingCode = pairing.code;
             chatgptRepair.pairingExpiresAt = pairing.expiresAt;
-            results.push(`已生成新的配对码，需要更新「${boundName}」`);
+            results.push(
+              decision.reason === "authorization_lost"
+                ? `已生成新的配对码，需要重新授权「${boundName}」`
+                : `已生成新的配对码，需要更新「${boundName}」`
+            );
           } catch (error) {
             report.oauth = { ok: false, detail: (error as Error).message };
           }
@@ -610,7 +628,13 @@ program
     }
     if (chatgptRepair.needed && chatgptRepair.userMessage) {
       say(chatgptRepair.userMessage);
-      if (chatgptRepair.mcpUrl) say(`新的连接地址：${chatgptRepair.mcpUrl}`);
+      if (chatgptRepair.mcpUrl) {
+        say(
+          chatgptRepair.reason === "authorization_lost"
+            ? `连接地址：${chatgptRepair.mcpUrl}`
+            : `新的连接地址：${chatgptRepair.mcpUrl}`
+        );
+      }
       if (chatgptRepair.pairingCode) say(`配对码：${chatgptRepair.pairingCode}`);
       say("");
     }
