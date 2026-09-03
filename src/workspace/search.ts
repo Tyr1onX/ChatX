@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { NOISE_PATTERNS } from "./ignore.js";
 import { Workspace } from "./manager.js";
 
 export interface SearchOptions {
@@ -93,10 +94,19 @@ async function searchWithRipgrep(
   opts: SearchOptions,
   limit: number
 ): Promise<SearchResult> {
-  const args = ["--json", "--max-filesize", "2M"];
+  const searchRel = path.relative(ws.root, searchAbs).split(path.sep).join("/");
+  if (searchRel && (ws.ignoreRules.isNoise(searchRel) || ws.ignoreRules.isNoise(`${searchRel}/`))) {
+    return { matches: [], matchCount: 0, truncated: false, engine: "ripgrep" };
+  }
+
+  const args = ["--no-config", "--json", "--max-filesize", "2M", "--hidden", "--no-ignore"];
   if (!opts.regex) args.push("-F");
   args.push("--smart-case");
   if (opts.glob) args.push("-g", opts.glob);
+  for (const customIgnore of ws.ignoreRules.unchangedCustomIgnoreFiles()) {
+    args.push("--ignore-file", customIgnore);
+  }
+  for (const pattern of NOISE_PATTERNS) args.push("-g", `!${pattern}`);
   args.push("--", opts.query, searchAbs);
 
   return new Promise((resolvePromise, reject) => {
