@@ -1,12 +1,12 @@
 # ChatX Security Model
 
-ChatX deliberately exposes local capabilities to a remote AI client. Its security model is therefore based on explicit capability boundaries, loopback-only local services, scoped authorization, path containment, and truthful documentation of what is **not** sandboxed.
+ChatX deliberately exposes local capabilities to a remote AI client. Its security model is based on explicit capability boundaries, loopback-only local services, scoped OAuth authorization, path containment, and truthful documentation of what is **not** sandboxed.
 
 ## Trust boundaries
 
 1. **Workspace boundary.** One ChatX bridge instance serves exactly one workspace. OAuth tokens are bound to that `workspace_id`.
 2. **Workspace content is untrusted.** README files, source code, diffs and logs may contain prompt injection. MCP tool descriptions explicitly tell the model to treat project content as data, not instructions.
-3. **Transport identity and capability authorization are separate concerns.** Cloudflare/public mode uses ChatX OAuth. OpenAI Secure MCP Tunnel mode relies on OpenAI Tunnel access for the remote identity boundary while ChatX still enforces its local capability policy.
+3. **Network reachability is not authorization.** Cloudflare only provides the HTTPS path to the loopback bridge. ChatX OAuth and bearer-token checks authorize MCP access.
 4. **`process.run` is host-level execution.** The working directory is workspace-bounded and ChatX does not invoke an implicit shell, but an executable launched under the current OS account may access resources outside the workspace if that OS account can access them. Do not describe `process.run` as a filesystem sandbox.
 5. **Browser control is isolated from the user's normal browser by profile, not by OS sandbox.** ChatX uses a dedicated Playwright profile and does not automatically attach to the normal Chrome/Edge profile.
 
@@ -25,15 +25,13 @@ New authorizations expose narrow scopes:
 | `browser.control` | Dedicated-browser navigate/snapshot/click/type |
 | `offline_access` | Refresh-token flow |
 
-`workspace.control` is a **deprecated compatibility scope**. Existing paired connectors may already hold it, so ChatX accepts it as an alias for `workspace.write`, `process.run`, and `browser.control`. New deployments should use the narrower scopes.
-
-These OAuth scopes apply to ChatX OAuth/public transports. In OpenAI Secure MCP Tunnel mode, ChatX does not run its own OAuth flow for the tunneled MCP endpoint; a client authorized to use that Tunnel can reach the MCP tools enabled by that ChatX instance. Treat Tunnel access itself as a high-trust grant.
+`workspace.control` is a **deprecated compatibility scope**. Existing paired connectors may already hold it, so ChatX accepts it as an alias for `workspace.write`, `process.run`, and `browser.control`. New deployments use the narrower scopes.
 
 ## Threats and mitigations
 
 | Threat | Mitigation / limitation |
 | --- | --- |
-| Public MCP URL leaks | In Cloudflare mode, URL knowledge is insufficient: `/mcp` requires a valid bearer token. Tokens are workspace-bound. |
+| Public MCP URL leaks | URL knowledge is insufficient: `/mcp` requires a valid bearer token. Tokens are workspace-bound. |
 | Pairing-code brute force | CSPRNG code, short TTL, one-time use, attempt limit and rate limiting. |
 | OAuth interception / CSRF | PKCE S256, state round-trip, short-lived one-time authorization codes, redirect URI validation. |
 | Token theft from state file | Persisted token records contain SHA-256 hashes rather than raw bearer/refresh tokens. Access tokens expire; refresh tokens rotate. |
@@ -45,38 +43,30 @@ These OAuth scopes apply to ChatX OAuth/public transports. In OpenAI Secure MCP 
 | Command escaping workspace | The `cwd` is workspace-contained, but the executable is not OS-sandboxed. `process.run` must be treated as high privilege. |
 | Browser credential exposure | ChatX returns page text, not raw cookie/storage values. Dedicated profile is used. Pages themselves can still contain sensitive visible information, so `browser.control` is high trust. |
 | Admin API exposure | Loopback-only, random admin token, proxy-header rejection, unauthenticated probes return 404. |
-| Tunnel exposure | Bridge refuses non-loopback bind addresses. Public exposure exists only through the selected transport. |
+| Tunnel exposure | Bridge refuses non-loopback bind addresses. Public exposure exists only through Cloudflare. |
 | Prompt injection | Project content cannot grant new scopes. Tool calls still execute with whatever capabilities the user already authorized, so the model/client must follow the user's intent and treat project instructions as untrusted. |
-| Credential leakage in logs | Logger redacts bearer/token-like values. OpenAI runtime keys are referenced by environment variable name and must never be persisted by ChatX. |
+| Credential leakage in logs | Logger redacts bearer/token-like values. |
 
-## Transport-specific model
-
-### Cloudflare Quick / Named Tunnel
+## Connection model
 
 ```text
-ChatGPT -> HTTPS Cloudflare endpoint -> ChatX loopback bridge
-                                   -> ChatX OAuth / bearer scope checks
+ChatGPT
+  -> HTTPS Cloudflare Quick / Named Tunnel
+  -> ChatX loopback bridge
+  -> ChatX OAuth / bearer scope checks
+  -> MCP tools
 ```
 
-- OAuth discovery, authorization and token endpoints are part of the ChatX bridge.
+- The bridge itself binds only to loopback.
+- Cloudflare Quick and Named Tunnel are network transports, not authorization systems.
+- OAuth discovery, authorization and token endpoints are part of ChatX.
 - Public MCP requests require bearer authorization.
 - Knowing the public hostname is not authorization.
-
-### OpenAI Secure MCP Tunnel (experimental)
-
-```text
-ChatGPT / OpenAI -> Secure MCP Tunnel -> tunnel-client -> 127.0.0.1:<port>/mcp -> ChatX
-```
-
-- There is no public ChatX URL.
-- `tunnel-client` authenticates to the OpenAI control plane using a runtime API key reference.
-- In this mode ChatX does not expose its local OAuth authorization server through the tunnel; remote eligibility/access is controlled by the OpenAI Tunnel/workspace policy.
-- ChatX still enforces workspace path rules, sensitive-file rules, tool limits and the fact that its target HTTP server is loopback-only.
-- Windows browser/WinINET proxy settings are not guaranteed to be inherited by `tunnel-client`. ChatX supports a per-transport HTTP(S) proxy injected only into the tunnel-client process, while localhost is kept in `NO_PROXY`.
+- ChatGPT setup uses one verified flow: Plugins → New plugin → Server URL → OAuth.
 
 ## Local state and compatibility
 
-State is stored with owner-oriented filesystem permissions where supported. For `v0.1.0-alpha.1`, the default directory intentionally remains the legacy `codex-with-chatgpt` state directory so existing OAuth tokens, connector metadata and sessions survive the ChatX rename. `CHATX_STATE_DIR` is the preferred override; `C2C_STATE_DIR` remains accepted.
+State is stored with owner-oriented filesystem permissions where supported. During the current alpha line, the default directory intentionally remains the legacy `codex-with-chatgpt` state directory so existing OAuth tokens, connector metadata and sessions survive the ChatX rename. `CHATX_STATE_DIR` is the preferred override; `C2C_STATE_DIR` remains accepted.
 
 Token prefixes (`c2c_at`, `c2c_rt`, etc.) are also retained for compatibility and should be treated as secrets regardless of their historical name.
 
@@ -112,8 +102,7 @@ Token prefixes (`c2c_at`, `c2c_rt`, etc.) are also retained for compatibility an
 - Raw OAuth tokens are not stored, but persisted token hashes/registrations are file-based rather than OS-keychain-backed.
 - `process.run` does not provide executable allowlists or per-call human confirmations yet.
 - Browser control is not an OS-level sandbox.
-- OpenAI Secure MCP Tunnel has been locally verified on Windows, but ChatGPT-side Tunnel connection availability varies by account/workspace and is therefore experimental.
 
 ## Security release gate
 
-Before a tagged release, the repository must pass tests, typecheck, build, production dependency audit, secret-pattern scan, `git diff --check`, and a clean tarball install smoke. CI runs Windows and Ubuntu for Node 20 and 22.
+Before a tagged release, the repository must pass tests, typecheck, build, production dependency audit, secret-pattern scan, `git diff --check`, and a clean tarball install smoke. CI covers Windows, macOS, and Linux where configured by the current workflow.
