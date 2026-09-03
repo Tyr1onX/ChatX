@@ -35,8 +35,7 @@
     "chatgpt",
     "local-agent",
     "computer-use",
-    "cloudflare-tunnel",
-    "openai-tunnel"
+    "cloudflare-tunnel"
   ],
   "engines": {
     "node": ">=20"
