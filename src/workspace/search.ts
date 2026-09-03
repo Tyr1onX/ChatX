@@ -152,7 +152,7 @@ async function searchWithRipgrep(
         reject(new Error(
           `ripgrep search failed${code !== null ? ` with exit code ${code}` : signal ? ` with signal ${signal}` : ""}` +
           (detail ? `: ${detail}` : "")
-        );
+        ));
         return;
       }
       resolvePromise({ matches, matchCount: matches.length, truncated, engine: "ripgrep" });
