@@ -45,60 +45,88 @@ macOS 和 Windows 使用同一套 ChatX 代码，不维护独立“Mac 版”。
 
 macOS 会自动查找 Google Chrome、Microsoft Edge、Chromium 和 Chrome Canary。非标准安装位置可以通过 `CHATX_BROWSER_BIN` 指定浏览器可执行文件。
 
-## 使用前需要准备什么？
+## 推荐安装方式：交给 Codex / AI Agent
 
-真正使用 ChatX，需要三部分都具备：
+普通用户不需要自己处理 Node、Bridge、端口、Tunnel 或本地配置。
 
-1. **本机环境**：Node.js 20+、`cloudflared`、一个你愿意让 ChatGPT 操作的项目目录。
-2. **ChatGPT 能力**：你的账号 / Workspace 能使用自定义 MCP Connector / Developer Mode。
-3. **首次连接**：需要在 ChatGPT 中为当前 Workspace 添加 Connector，并完成配对。
-
-ChatX 无法替你解锁 ChatGPT 本身没有开放的产品能力。
-
-### Cloudflare 域名不是必须的
-
-默认可以直接使用 **Cloudflare Quick Tunnel**：
-
-- 不需要 Cloudflare 账号
-- 不需要自己的域名
-- 最容易开始
-- 重启或重建连接后地址可能变化
-
-如果你已经有 Cloudflare 账号和托管域名，可以选择 **固定域名**。这样地址更稳定，长期使用时通常更省事。
-
-## 推荐：让 AI Agent 帮你配置
-
-如果你已经在使用 Codex、Claude Code、Cursor Agent 或其他能够操作本机终端的 AI Agent，推荐直接让它完成安装和连接。
-
-### Codex
-
-把下面这段话交给 Codex：
+把下面这段话直接交给 Codex：
 
 ```text
 请帮我把 ChatX 安装并完整配置到当前项目：
 https://github.com/Tyr1onX/ChatX
 
 先阅读 skill/SKILL.md，按 first-time setup 执行。
-不要只完成本机安装，还要继续完成公网连接、ChatGPT Connector、配对和最终端到端验证。
-能自动完成的步骤直接完成；只有必须由我本人完成的登录或授权步骤再叫我操作，而且每次只告诉我当前一步。
-完成后确认 ChatGPT 能真实读取当前 Workspace。
+本机安装、Workspace、Bridge、cloudflared、Cloudflare 连接、chatx setup、诊断和验证都由你自己完成。
+只有 Cloudflare 登录/授权、ChatGPT 页面授权或其他必须由我本人确认的步骤再叫我操作，而且每次只告诉我当前一步。
+
+ChatGPT 端只使用已经验证过的路线：
+设置 → 插件 → 新插件 → 服务器 URL → 粘贴 ChatX 输出的 URL → 身份验证选择 OAuth → 创建并完成授权/配对。
+不要引导我寻找 Developer Mode，也不要根据套餐猜测另一套 MCP 接入路径。
+
+最后确认 ChatGPT 能真实读取当前 Workspace。
 不要修改项目业务代码来完成 ChatX 安装。
 ```
 
-### 其他 AI Agent
+其他能够操作本机终端的 AI Agent 使用：
 
 ```text
 请帮我完整安装并配置 ChatX：
 https://github.com/Tyr1onX/ChatX
 
 先阅读 docs/agent-setup.md，并持续执行到 ChatGPT 能真实读取当前 Workspace 为止。
-不要把“软件安装成功”当作完成。
-能自动完成的步骤直接完成；必须由我本人完成的登录或授权再叫我操作，完成后继续原任务。
+能自动完成的步骤全部自己完成；只在登录、授权、OAuth 或必须由我本人确认时让我操作。
+ChatGPT 端只走「设置 → 插件 → 新插件 → 服务器 URL → OAuth」这条已经验证过的路线。
+不要引导我寻找 Developer Mode。
 ```
 
-完整执行规范见 [docs/agent-setup.md](docs/agent-setup.md)。
+完整 Agent 执行规范见 [docs/agent-setup.md](docs/agent-setup.md)。
 
-## 手动安装
+## 用户实际需要做什么？
+
+正常首次安装中，用户只需要处理两类不能可靠代办的动作：
+
+1. **Cloudflare 登录 / 授权**：仅在 Agent 配置固定域名或当前环境要求登录时出现。完成页面操作后，让 Agent 继续。
+2. **ChatGPT 插件创建 / OAuth**：Agent 会给出当前 Workspace 的 MCP Server URL。
+
+ChatGPT 中固定使用：
+
+```text
+设置
+→ 插件
+→ 新插件
+→ 连接选择「服务器 URL」
+→ 粘贴 Agent 给出的 URL
+→ 身份验证选择「OAuth」
+→ 勾选风险确认
+→ 创建
+→ 完成授权 / 配对
+```
+
+不需要先开启 Developer Mode，也不需要到 Advanced Settings / Security 中寻找其他入口。
+
+最后在 ChatGPT 中测试：
+
+```text
+列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
+```
+
+能看到当前项目的真实文件，才算完整链路配置成功。
+
+## Cloudflare 地址
+
+默认可以直接使用 **Cloudflare Quick Tunnel**：
+
+- 不需要购买域名
+- 最容易开始
+- 重启或重建连接后地址可能变化
+
+如果你已经有托管在 Cloudflare 的域名并希望固定地址，Agent 会配置 **Named Tunnel**。需要登录或授权时再由你本人完成页面操作。
+
+普通用户不需要手动运行 Cloudflare 命令。
+
+## 高级：手动安装
+
+只有不使用 AI Agent 时才需要手动执行。
 
 ### 1. 安装依赖
 
@@ -119,9 +147,6 @@ brew install node cloudflared
 
 ```bash
 npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1/chatx-local-bridge-0.1.0-alpha.1.tgz
-```
-
-```bash
 chatx --version
 ```
 
@@ -134,19 +159,15 @@ cd /path/to/your/project
 chatx setup
 ```
 
-ChatX 会启动 Bridge，并给出当前 Workspace 的连接信息。
+记录输出的 MCP Server URL。
 
-### 4. 添加 ChatGPT Connector
-
-在 ChatGPT 的自定义 Connector / Developer Mode 中添加 `chatx setup` 给出的 MCP 地址，并按页面完成配对。
-
-最后测试：
+### 4. 添加 ChatGPT 插件
 
 ```text
-列出当前 ChatX 工作区的顶层文件，不要修改任何内容。
+设置 → 插件 → 新插件
 ```
 
-能看到当前项目的真实文件，才算完整链路配置成功。
+选择「服务器 URL」，粘贴 `chatx setup` 输出的 URL，身份验证选择 OAuth，然后完成创建、授权和配对。
 
 ## 日常使用
 
