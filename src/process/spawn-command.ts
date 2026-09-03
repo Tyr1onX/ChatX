@@ -35,7 +35,12 @@ function existingFile(candidate: string): string | null {
 function resolveWindowsCommand(command: string): string | null {
   const hasSeparator = command.includes("/") || command.includes("\\");
   const extension = path.extname(command).toLowerCase();
-  const candidates = extension ? [command] : [command, ...windowsPathExt().map((ext) => command + ext)];
+  // On Windows, an extensionless sibling can be a POSIX shim (Corepack ships
+  // `pnpm` beside `pnpm.cmd`). Follow PATHEXT-style executable candidates
+  // first; only consider the literal extensionless file as a last fallback.
+  const candidates = extension
+    ? [command]
+    : [...windowsPathExt().map((ext) => command + ext), command];
 
   if (path.isAbsolute(command) || hasSeparator) {
     for (const candidate of candidates) {
