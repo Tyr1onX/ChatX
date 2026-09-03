@@ -106,6 +106,27 @@ describe("ProcessSessionManager", () => {
     }
   });
 
+  it("starts the pnpm command shim on Windows", async () => {
+    if (process.platform !== "win32") return;
+
+    const root = makeTmpDir("process-pnpm-windows");
+    const manager = new ProcessSessionManager(new Workspace(root));
+    try {
+      const started = await manager.start({
+        command: "pnpm",
+        args: ["--version"],
+      });
+      await waitFor(() => manager.read(started.id).process.status !== "running");
+
+      const result = manager.read(started.id);
+      expect(result.process.exitCode).toBe(0);
+      expect(result.stdout.text.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    } finally {
+      await manager.closeAll();
+      cleanup(root);
+    }
+  });
+
   it("closeAll terminates running sessions and forgets them", async () => {
     const root = makeTmpDir("process-close");
     const manager = new ProcessSessionManager(new Workspace(root));
