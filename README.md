@@ -9,7 +9,7 @@ ChatX 是运行在你电脑上的本地桥接器。连接完成后，ChatGPT 可
 [English](README.en.md) · [AI Agent 安装说明](docs/agent-setup.md) · [排障](docs/troubleshooting.md) · [安全说明](docs/security.md)
 
 > **最新公开 Release：`v0.1.0-alpha.1`**  
-> `main` 已进入 `v0.1.0-alpha.2` 候选状态，并包含第一版 macOS 支持。新的 prerelease 尚未发布，因此 macOS 测试请按 [macOS Compatibility Smoke](docs/macos-smoke.md) 使用源码安装。
+> `main` 已进入 `v0.1.0-alpha.2` 候选状态，并包含第一版 macOS 支持。Windows 与 macOS 均已完成真实 ChatGPT 端到端安装验证；新的 prerelease 尚未发布，因此 macOS 目前仍建议按 [macOS Compatibility Smoke](docs/macos-smoke.md) 使用源码安装。
 
 ## 它能做什么？
 
@@ -37,8 +37,8 @@ ChatX 不是远程桌面，也不会默认接管你平时使用的浏览器。
 
 | 平台 | 当前状态 |
 | --- | --- |
-| Windows | ✅ 真实环境使用 + CI 已验证 |
-| macOS | 🧪 源码已通过 macOS Node 20/22 CI，并真实启动独立浏览器完成 Smoke；等待社区真实 Mac + ChatGPT 端到端验证 |
+| Windows | ✅ 真实 ChatGPT 端到端使用 + CI 已验证 |
+| macOS | ✅ 真实 Mac + ChatGPT 端到端安装已验证；Node 20/22 CI 与独立浏览器 Smoke 已验证 |
 | Linux | 🧪 核心 CI 已验证，真实桌面端到端覆盖仍有限 |
 
 macOS 和 Windows 使用同一套 ChatX 代码，不维护独立“Mac 版”。
@@ -150,7 +150,7 @@ npm install -g https://github.com/Tyr1onX/ChatX/releases/download/v0.1.0-alpha.1
 chatx --version
 ```
 
-> `alpha.1` 不包含本轮新增的 macOS 浏览器支持。Mac 测试者请使用 [macOS Compatibility Smoke](docs/macos-smoke.md) 中的源码安装方式测试当前 `main`。
+> `alpha.1` 不包含本轮新增的 macOS 浏览器支持。Mac 用户请使用 [macOS Compatibility Smoke](docs/macos-smoke.md) 中的源码安装方式测试当前 `main`，直到下一版 prerelease 发布。
 
 ### 3. 配置当前项目
 
@@ -194,6 +194,10 @@ ChatX 具备较强的本机能力，请只连接你信任的 AI 客户端，并�
 `process.run` 启动的程序仍拥有当前操作系统用户本身具备的权限，因此 ChatX 不是完整的主机沙箱。
 
 详细边界见 [安全说明](docs/security.md)。
+
+## 项目来源
+
+ChatX 基于 [XiaoDuoYa/codex-with-chatgpt](https://github.com/XiaoDuoYa/codex-with-chatgpt) 演化而来，并保留原项目的 MIT 许可与贡献者版权。ChatX 在这个基础上继续扩展了本地写入与执行、独立浏览器、跨平台支持、连接生命周期和面向普通用户的安装流程。
 
 ## 更多文档
 
