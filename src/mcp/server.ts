@@ -3,6 +3,12 @@ import { z } from "zod";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Workspace, WorkspaceError } from "../workspace/manager.js";
 import { applyWorkspacePatch, WorkspacePatchError } from "../workspace/patch.js";
+import {
+  createWorkspaceDirectory,
+  deleteWorkspacePath,
+  moveWorkspacePath,
+  WorkspaceMutationError,
+} from "../workspace/mutate.js";
 import { searchWorkspace } from "../workspace/search.js";
 import { gitDiff, gitInfo, gitStatus, type DiffMode } from "../workspace/git.js";
 import { latestExecutionRecord, readExecutionRecords } from "../execution/records.js";
@@ -41,6 +47,7 @@ function mapError(error: unknown): ToolResult {
   if (
     error instanceof WorkspaceError ||
     error instanceof WorkspacePatchError ||
+    error instanceof WorkspaceMutationError ||
     error instanceof ProcessSessionError
   ) {
     return fail(error.code, error.message);
@@ -233,6 +240,83 @@ export function createMcpServer(ctx: McpContext): McpServer {
         }
         await fs.promises.writeFile(target.abs, args.content, { encoding: "utf8", flag: "w" });
         return ok({ path: target.rel, bytesWritten: Buffer.byteLength(args.content, "utf8") });
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "create_directory",
+    {
+      title: "Create workspace directory",
+      description:
+        `Create a directory inside the connected workspace. Parent directories are created by default. ` +
+        `Sensitive paths, .git metadata and paths outside the workspace are denied.`,
+      inputSchema: {
+        path: z.string().min(1).describe("Workspace-relative directory path"),
+        parents: z.boolean().default(true).describe("Create missing parent directories"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "workspace.write");
+      if (denied) return denied;
+      try {
+        return ok(await createWorkspaceDirectory(workspace, args.path, { parents: args.parents }));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "move_path",
+    {
+      title: "Move workspace path",
+      description:
+        `Move or rename one existing file or directory inside the connected workspace. The destination ` +
+        `must not already exist; missing destination parents are created by default. Sensitive paths, ` +
+        `.git metadata and paths outside the workspace are denied.`,
+      inputSchema: {
+        source: z.string().min(1).describe("Existing workspace-relative source path"),
+        destination: z.string().min(1).describe("New workspace-relative destination path"),
+        create_parents: z.boolean().default(true).describe("Create missing destination parent directories"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "workspace.write");
+      if (denied) return denied;
+      try {
+        return ok(await moveWorkspacePath(workspace, args.source, args.destination, {
+          createParents: args.create_parents,
+        }));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "delete_path",
+    {
+      title: "Delete workspace path",
+      description:
+        `Delete one file or directory inside the connected workspace. Non-empty directories are refused ` +
+        `unless recursive=true is explicitly supplied. The workspace root, .git metadata, sensitive paths ` +
+        `and paths outside the workspace are always denied.`,
+      inputSchema: {
+        path: z.string().min(1).describe("Workspace-relative file or directory path"),
+        recursive: z.boolean().default(false).describe("Allow deleting a non-empty directory tree"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "workspace.write");
+      if (denied) return denied;
+      try {
+        return ok(await deleteWorkspacePath(workspace, args.path, { recursive: args.recursive }));
       } catch (error) {
         return mapError(error);
       }
