@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { CUSTOM_IGNORE_FILENAMES, NOISE_PATTERNS } from "./ignore.js";
+import { NOISE_PATTERNS } from "./ignore.js";
 import { Workspace } from "./manager.js";
 
 export interface SearchOptions {
@@ -98,9 +98,8 @@ async function searchWithRipgrep(
   if (!opts.regex) args.push("-F");
   args.push("--smart-case");
   if (opts.glob) args.push("-g", opts.glob);
-  for (const fileName of CUSTOM_IGNORE_FILENAMES) {
-    const customIgnore = path.join(ws.root, fileName);
-    if (fs.existsSync(customIgnore)) args.push("--ignore-file", customIgnore);
+  for (const customIgnore of ws.ignoreRules.unchangedCustomIgnoreFiles()) {
+    args.push("--ignore-file", customIgnore);
   }
   for (const pattern of NOISE_PATTERNS) args.push("-g", `!${pattern}`);
   args.push("--", opts.query, searchAbs);
