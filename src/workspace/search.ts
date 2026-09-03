@@ -10,12 +10,21 @@ export interface SearchOptions {
   glob?: string;
   limit?: number;
   regex?: boolean;
+  contextBefore?: number;
+  contextAfter?: number;
+}
+
+export interface SearchContextLine {
+  line: number;
+  text: string;
 }
 
 export interface SearchMatch {
   path: string;
   line: number;
   text: string;
+  before?: SearchContextLine[];
+  after?: SearchContextLine[];
 }
 
 export interface SearchResult {
@@ -23,7 +32,19 @@ export interface SearchResult {
   matchCount: number;
   truncated: boolean;
   engine: "ripgrep" | "node";
+  contextBefore?: number;
+  contextAfter?: number;
+  contextBytes?: number;
+  maxContextBytes?: number;
+  contextSourceBytes?: number;
+  maxContextSourceBytes?: number;
+  contextTruncated?: boolean;
 }
+
+const MAX_CONTEXT_LINES = 3;
+const MAX_CONTEXT_BYTES = 128 * 1024;
+const MAX_CONTEXT_SOURCE_BYTES = 16 * 1024 * 1024;
+const MAX_CONTEXT_LINE_CHARS = 500;
 
 const RG_CANDIDATES = [
   "rg",
@@ -176,6 +197,100 @@ async function searchWithNode(
   return { matches, matchCount: matches.length, truncated, engine: "node" };
 }
 
+async function attachSearchContext(
+  ws: Workspace,
+  result: SearchResult,
+  contextBefore: number,
+  contextAfter: number
+): Promise<SearchResult> {
+  if (contextBefore === 0 && contextAfter === 0) return result;
+
+  const cache = new Map<string, string[] | null>();
+  let contextBytes = 0;
+  let contextSourceBytes = 0;
+  let contextTruncated = false;
+  let budgetExhausted = false;
+
+  const readLines = async (relPath: string): Promise<string[] | null> => {
+    if (cache.has(relPath)) return cache.get(relPath) ?? null;
+    try {
+      const target = ws.resolve(relPath);
+      const stat = await fs.promises.stat(target.abs);
+      if (!stat.isFile() || stat.size > 2 * 1024 * 1024) {
+        cache.set(relPath, null);
+        return null;
+      }
+      if (contextSourceBytes + stat.size > MAX_CONTEXT_SOURCE_BYTES) {
+        contextTruncated = true;
+        budgetExhausted = true;
+        cache.set(relPath, null);
+        return null;
+      }
+      const content = await fs.promises.readFile(target.abs, "utf8");
+      contextSourceBytes += stat.size;
+      if (content.includes("\0")) {
+        cache.set(relPath, null);
+        return null;
+      }
+      const lines = content.split(/\r?\n/);
+      cache.set(relPath, lines);
+      return lines;
+    } catch {
+      cache.set(relPath, null);
+      return null;
+    }
+  };
+
+  const appendLines = (
+    target: SearchContextLine[],
+    source: string[],
+    startIndex: number,
+    endIndexExclusive: number
+  ): void => {
+    for (let i = startIndex; i < endIndexExclusive; i++) {
+      if (budgetExhausted) return;
+      const text = (source[i] ?? "").trimEnd().slice(0, MAX_CONTEXT_LINE_CHARS);
+      const cost = Buffer.byteLength(text, "utf8") + 1;
+      if (contextBytes + cost > MAX_CONTEXT_BYTES) {
+        contextTruncated = true;
+        budgetExhausted = true;
+        return;
+      }
+      target.push({ line: i + 1, text });
+      contextBytes += cost;
+    }
+  };
+
+  for (const match of result.matches) {
+    if (budgetExhausted) break;
+    const lines = await readLines(match.path);
+    if (!lines || match.line < 1) continue;
+    const matchIndex = match.line - 1;
+
+    if (contextBefore > 0) {
+      const before: SearchContextLine[] = [];
+      appendLines(before, lines, Math.max(0, matchIndex - contextBefore), matchIndex);
+      if (before.length > 0) match.before = before;
+    }
+    if (contextAfter > 0 && !budgetExhausted) {
+      const after: SearchContextLine[] = [];
+      appendLines(after, lines, matchIndex + 1, Math.min(lines.length, matchIndex + 1 + contextAfter));
+      if (after.length > 0) match.after = after;
+    }
+  }
+
+  return {
+    ...result,
+    contextBefore,
+    contextAfter,
+    contextBytes,
+    maxContextBytes: MAX_CONTEXT_BYTES,
+    contextSourceBytes,
+    maxContextSourceBytes: MAX_CONTEXT_SOURCE_BYTES,
+    contextTruncated,
+  };
+}
+
 export function globToRegex(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]]/g, "\\$&")
@@ -189,18 +304,27 @@ export function globToRegex(glob: string): RegExp {
 }
 
 export async function searchWorkspace(ws: Workspace, opts: SearchOptions): Promise<SearchResult> {
+  const contextBefore = Math.min(MAX_CONTEXT_LINES, Math.max(0, Math.floor(opts.contextBefore ?? 0)));
+  const contextAfter = Math.min(MAX_CONTEXT_LINES, Math.max(0, Math.floor(opts.contextAfter ?? 0)));
   if (!opts.query || opts.query.length < 2) {
-    return { matches: [], matchCount: 0, truncated: false, engine: "node" };
+    return attachSearchContext(
+      ws,
+      { matches: [], matchCount: 0, truncated: false, engine: "node" },
+      contextBefore,
+      contextAfter
+    );
   }
   const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
   const { abs } = ws.resolve(opts.path ?? ".");
   const rg = findRipgrep();
   if (rg) {
     try {
-      return await searchWithRipgrep(ws, rg, abs, opts, limit);
+      const result = await searchWithRipgrep(ws, rg, abs, opts, limit);
+      return attachSearchContext(ws, result, contextBefore, contextAfter);
     } catch {
       // fall through to node engine
     }
   }
-  return searchWithNode(ws, abs, opts, limit);
+  const result = await searchWithNode(ws, abs, opts, limit);
+  return attachSearchContext(ws, result, contextBefore, contextAfter);
 }

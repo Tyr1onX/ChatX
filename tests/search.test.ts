@@ -13,11 +13,24 @@ beforeAll(() => {
   write(root, "src/deep/nested.ts", `// needle-alpha appears here too\n${globMarker}\n`);
   write(root, "src/root.ts", `${globMarker}\n`);
   write(root, "root.ts", `${globMarker}\n`);
+  write(
+    root,
+    "src/context.ts",
+    "before-a\nbefore-b\nconst target = 'needle-context';\nafter-a\nafter-b\ntail\n"
+  );
   write(root, "README.md", "This project contains needle-alpha documentation.\n");
   write(root, ".env", "NEEDLE-ALPHA=secret\n");
   write(root, "node_modules/pkg/index.js", "needle-alpha in dependencies\n");
   for (let i = 0; i < 30; i++) {
     write(root, `many/file-${i}.txt`, "needle-beta\nneedle-beta\n");
+  }
+  const contextLine = "x".repeat(500);
+  for (let i = 0; i < 50; i++) {
+    write(
+      root,
+      `context-heavy/file-${i}.txt`,
+      [contextLine, contextLine, contextLine, `needle-context-budget-${i}`, contextLine, contextLine, contextLine].join("\n") + "\n"
+    );
   }
   ws = new Workspace(root);
 });
@@ -89,5 +102,44 @@ describe.each(engines())("search engine: %s", (engine) => {
     const paths = result.matches.map((match) => match.path);
     expect(paths).toContain("src/auth.ts");
     expect(paths).not.toContain("README.md");
+  });
+
+  it("returns bounded context around each match when requested", async () => {
+    configure();
+    const result = await searchWorkspace(ws, {
+      query: "needle-context",
+      path: "src",
+      contextBefore: 2,
+      contextAfter: 2,
+    });
+    const match = result.matches.find((entry) => entry.path === "src/context.ts");
+    expect(match?.line).toBe(3);
+    expect(match?.before).toEqual([
+      { line: 1, text: "before-a" },
+      { line: 2, text: "before-b" },
+    ]);
+    expect(match?.after).toEqual([
+      { line: 4, text: "after-a" },
+      { line: 5, text: "after-b" },
+    ]);
+    expect(result.contextBefore).toBe(2);
+    expect(result.contextAfter).toBe(2);
+    expect(result.contextTruncated).toBe(false);
+  });
+
+  it("caps aggregate context output without dropping the primary matches", async () => {
+    configure();
+    const result = await searchWorkspace(ws, {
+      query: "needle-context-budget",
+      path: "context-heavy",
+      limit: 50,
+      contextBefore: 3,
+      contextAfter: 3,
+    });
+    expect(result.matches.length).toBe(50);
+    expect(result.contextTruncated).toBe(true);
+    expect(result.contextBytes).toBeLessThanOrEqual(result.maxContextBytes ?? 0);
+    expect(result.maxContextBytes).toBe(128 * 1024);
+    expect(result.matches.every((match) => match.text.includes("needle-context-budget"))).toBe(true);
   });
 });

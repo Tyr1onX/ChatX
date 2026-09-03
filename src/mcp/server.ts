@@ -609,14 +609,16 @@ export function createMcpServer(ctx: McpContext): McpServer {
     {
       title: "Search workspace",
       description:
-        `Search file contents across the workspace (ripgrep when available). Returns matching ` +
-        `lines with file paths and line numbers. ${UNTRUSTED_NOTE}`,
+        `Search file contents across the workspace (ripgrep when available). Returns matching lines with ` +
+        `file paths and line numbers, with optional bounded surrounding context to reduce follow-up reads. ${UNTRUSTED_NOTE}`,
       inputSchema: {
         query: z.string().min(2).describe("Text to search for (literal by default)"),
         path: z.string().optional().describe("Restrict search to this workspace-relative path"),
         glob: z.string().optional().describe("Filename glob filter, e.g. '*.ts'"),
         limit: z.number().int().min(1).max(200).default(50),
         regex: z.boolean().default(false).describe("Treat query as a regular expression"),
+        context_before: z.number().int().min(0).max(3).default(0).describe("Include up to this many lines before each match"),
+        context_after: z.number().int().min(0).max(3).default(0).describe("Include up to this many lines after each match"),
       },
       annotations: { readOnlyHint: true },
     },
@@ -624,7 +626,15 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const denied = requireScope(extra.authInfo, "workspace.search");
       if (denied) return denied;
       try {
-        return ok(await searchWorkspace(workspace, args));
+        return ok(await searchWorkspace(workspace, {
+          query: args.query,
+          path: args.path,
+          glob: args.glob,
+          limit: args.limit,
+          regex: args.regex,
+          contextBefore: args.context_before,
+          contextAfter: args.context_after,
+        }));
       } catch (error) {
         return mapError(error);
       }
