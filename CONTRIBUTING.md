@@ -13,15 +13,14 @@ corepack pnpm audit --prod
 corepack pnpm release:smoke
 ```
 
-CI runs on Windows and Ubuntu with Node.js 20 and 22.
-
 ## Security-sensitive changes
 
 - Keep the MCP HTTP listener loopback-only.
-- Never persist raw OAuth, OpenAI, Cloudflare, browser, or other long-lived credentials in the repository.
+- Keep remote MCP access behind ChatX OAuth bearer authorization.
+- Never persist raw OAuth, Cloudflare, browser, or other long-lived credentials in the repository.
 - Treat `process.run` as host-level code execution under the current OS user.
 - Keep `workspace.write`, `process.run`, and `browser.control` independently scoped.
-- Add regression coverage when changing path containment, sensitive-file rules, OAuth, tunnel transport, command execution, or browser control.
+- Add regression coverage when changing path containment, sensitive-file rules, OAuth, Cloudflare connectivity, command execution, or browser control.
 - Preserve upgrade compatibility unless a migration is explicitly documented.
 
 ## Pull requests
