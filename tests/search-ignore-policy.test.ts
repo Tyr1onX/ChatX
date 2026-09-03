@@ -86,4 +86,40 @@ describe.each(engines())("search ignore policy: %s", (engine) => {
     expect(result.engine).toBe(engine);
     expect(result.matches.map((match) => match.path)).toEqual(["config-proof.txt"]);
   });
+
+  it("keeps the Workspace startup snapshot when a custom ignore file changes", async () => {
+    const snapshotRoot = makeTmpDir("search-ignore-snapshot-change");
+    try {
+      write(snapshotRoot, ".chatxignore", "snapshot-private/\n");
+      write(snapshotRoot, "snapshot-private/hidden.txt", "needle-snapshot-policy\n");
+      write(snapshotRoot, "live-private/visible.txt", "needle-snapshot-policy\n");
+      const snapshotWorkspace = new Workspace(snapshotRoot);
+      write(snapshotRoot, ".chatxignore", "live-private/\n");
+
+      configure();
+      const result = await searchWorkspace(snapshotWorkspace, { query: "needle-snapshot-policy" });
+
+      expect(result.engine).toBe(engine);
+      expect(result.matches.map((match) => match.path)).toEqual(["live-private/visible.txt"]);
+    } finally {
+      cleanup(snapshotRoot);
+    }
+  });
+
+  it("does not let a custom ignore file created after startup affect only ripgrep", async () => {
+    const snapshotRoot = makeTmpDir("search-ignore-snapshot-create");
+    try {
+      write(snapshotRoot, "late-private/visible.txt", "needle-late-policy\n");
+      const snapshotWorkspace = new Workspace(snapshotRoot);
+      write(snapshotRoot, ".c2cignore", "late-private/\n");
+
+      configure();
+      const result = await searchWorkspace(snapshotWorkspace, { query: "needle-late-policy" });
+
+      expect(result.engine).toBe(engine);
+      expect(result.matches.map((match) => match.path)).toEqual(["late-private/visible.txt"]);
+    } finally {
+      cleanup(snapshotRoot);
+    }
+  });
 });
