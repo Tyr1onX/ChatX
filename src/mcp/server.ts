@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { Workspace, WorkspaceError } from "../workspace/manager.js";
+import { applyWorkspacePatch, WorkspacePatchError } from "../workspace/patch.js";
 import { searchWorkspace } from "../workspace/search.js";
 import { gitDiff, gitInfo, gitStatus, type DiffMode } from "../workspace/git.js";
 import { latestExecutionRecord, readExecutionRecords } from "../execution/records.js";
@@ -35,7 +36,9 @@ function fail(code: string, message: string): ToolResult {
 }
 
 function mapError(error: unknown): ToolResult {
-  if (error instanceof WorkspaceError) return fail(error.code, error.message);
+  if (error instanceof WorkspaceError || error instanceof WorkspacePatchError) {
+    return fail(error.code, error.message);
+  }
   return fail("INTERNAL_ERROR", error instanceof Error ? error.message : String(error));
 }
 
@@ -155,12 +158,53 @@ export function createMcpServer(ctx: McpContext): McpServer {
   });
 
   server.registerTool(
+    "apply_patch",
+    {
+      title: "Apply precise workspace patch",
+      description:
+        `Apply one or more exact old_text -> new_text replacements inside existing workspace files. ` +
+        `Prefer this over write_file for targeted edits: all edits are validated before writing, and ` +
+        `a stale or ambiguous old_text fails with PATCH_CONFLICT instead of changing the wrong region. ` +
+        `Sensitive files and paths outside the workspace are denied.`,
+      inputSchema: {
+        edits: z.array(
+          z.object({
+            path: z.string().min(1).describe("Workspace-relative file path"),
+            old_text: z.string().min(1).max(262144).describe("Exact existing text to replace"),
+            new_text: z.string().max(262144).describe("Replacement text"),
+            expected_occurrences: z.number().int().min(1).max(20).default(1),
+          })
+        ).min(1).max(50),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args, extra) => {
+      const denied = requireCapabilityScope(extra.authInfo, "workspace.write");
+      if (denied) return denied;
+      try {
+        return ok(await applyWorkspacePatch(
+          workspace,
+          args.edits.map((edit) => ({
+            path: edit.path,
+            oldText: edit.old_text,
+            newText: edit.new_text,
+            expectedOccurrences: edit.expected_occurrences,
+          }))
+        ));
+      } catch (error) {
+        return mapError(error);
+      }
+    }
+  );
+
+  server.registerTool(
     "write_file",
     {
       title: "Write workspace file",
       description:
         `Write UTF-8 text to a file inside the connected workspace. Existing files are overwritten only ` +
         `when overwrite is true. Sensitive files and paths outside the workspace are denied. ` +
+        `Use apply_patch instead for targeted edits to existing files. ` +
         `This is a direct local-control operation; use only when the user explicitly requested the change.`,
       inputSchema: {
         path: z.string().describe("Workspace-relative file path"),
@@ -195,6 +239,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       description:
         `Run one local executable with argument array in the connected workspace. The command is not ` +
         `run through a shell. Output is capped and the process is terminated on timeout. ` +
+        `This is a broad fallback capability: prefer structured workspace/git/browser tools when they fit. ` +
         `This is a direct local-control operation; use only when the user explicitly requested it.`,
       inputSchema: {
         command: z.string().min(1).describe("Executable name or path"),
