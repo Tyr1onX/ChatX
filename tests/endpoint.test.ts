@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   connectorAction,
   connectorNameFor,
+  connectorRepairDecision,
   LEGACY_CONNECTOR_NAME,
   mcpUrlFromPublic,
   normalizePublicUrl,
   reclaimUserMessage,
+  reauthorizeUserMessage,
 } from "../src/config/endpoint.js";
 
 describe("connectorAction", () => {
@@ -25,6 +27,44 @@ describe("connectorAction", () => {
 
   it("does nothing without a next URL", () => {
     expect(connectorAction("https://a.trycloudflare.com/mcp", null)).toBe("none");
+  });
+});
+
+describe("connectorRepairDecision", () => {
+  it("keeps a healthy same-address authorization untouched", () => {
+    expect(
+      connectorRepairDecision(
+        "https://stable.example.com/mcp",
+        "https://stable.example.com/mcp/",
+        true
+      )
+    ).toEqual({ action: "none" });
+  });
+
+  it("reauthorizes a recorded same-address connector when local authorization is gone", () => {
+    expect(
+      connectorRepairDecision(
+        "https://stable.example.com/mcp",
+        "https://stable.example.com/mcp",
+        false
+      )
+    ).toEqual({ action: "update", reason: "authorization_lost" });
+    expect(reauthorizeUserMessage("ChatX · Demo")).toContain("原地址");
+    expect(reauthorizeUserMessage("ChatX · Demo")).toContain("授权");
+  });
+
+  it("prefers address reclaim when both the URL changed and authorization is gone", () => {
+    expect(
+      connectorRepairDecision(
+        "https://old.example.com/mcp",
+        "https://new.example.com/mcp",
+        false
+      )
+    ).toEqual({ action: "update", reason: "address_reclaimed" });
+  });
+
+  it("does not invent an authorization repair before a connector has been recorded", () => {
+    expect(connectorRepairDecision(null, "https://stable.example.com/mcp", false)).toEqual({ action: "create" });
   });
 });
 
