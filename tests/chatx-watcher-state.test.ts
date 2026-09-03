@@ -8,7 +8,9 @@ import {
   confirmDone,
   createEmptyWatcherState,
   getPendingDoneRuns,
+  getUnpresentedDoneRuns,
   markFinishCandidate,
+  markRunPresented,
   recordActivity,
   reduceIgnoredUiEvent,
   startRun,
@@ -60,7 +62,7 @@ function completeRun(state, runId, startedAt = 1000) {
 }
 
 describe("ChatX Watcher run state machine", () => {
-  it("CASE 1: RUNNING -> stable -> DONE requests popup exactly once", () => {
+  it("CASE 1: RUNNING -> stable -> DONE requests presentation exactly once", () => {
     const state = createEmptyWatcherState();
     const started = startRun(state, baseMetadata, 1000, "run-1");
     expect(started.run.state).toBe(RunState.RUNNING);
@@ -122,7 +124,7 @@ describe("ChatX Watcher run state machine", () => {
     expect(acknowledgeRun(state, "conversation-a", 9000).acknowledged).toBe(false);
   });
 
-  it("CASE 5: a genuine new generation creates a new run and can request a new popup", () => {
+  it("CASE 5: a genuine new generation creates a new run and can request a new overlay", () => {
     const state = createEmptyWatcherState();
     startRun(state, baseMetadata, 1000, "run-1");
     completeRun(state, "run-1");
@@ -135,6 +137,21 @@ describe("ChatX Watcher run state machine", () => {
     const completed = completeRun(state, "run-2", 9000);
     expect(completed.shouldPresent).toBe(true);
     expect(state.runs).toHaveLength(2);
+  });
+
+  it("marks a DONE run presented only after an overlay is actually shown", () => {
+    const state = createEmptyWatcherState();
+    startRun(state, baseMetadata, 1000, "run-1");
+    const completed = completeRun(state, "run-1");
+
+    expect(completed.shouldPresent).toBe(true);
+    expect(completed.run?.presentedAt).toBeNull();
+    expect(getUnpresentedDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
+
+    const firstMark = markRunPresented(state, "run-1", 8000);
+    expect(firstMark?.presentedAt).toBe(8000);
+    expect(getUnpresentedDoneRuns(state)).toHaveLength(0);
+    expect(markRunPresented(state, "run-1", 9000)).toBeNull();
   });
 
   it("orders multiple pending completions deterministically without acknowledging on presentation", () => {

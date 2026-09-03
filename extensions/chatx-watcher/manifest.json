@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "ChatX Watcher",
   "version": "0.1.0",
-  "description": "极轻量监听 ChatGPT 对话完成状态，并用 ChatX Popup 提醒后快速返回对应对话。",
+  "description": "极轻量监听 ChatGPT 对话完成状态，并在当前网页右下角显示提醒。",
   "permissions": [
     "storage",
     "tabs"
   ],
   "host_permissions": [
-    "https://chatgpt.com/*"
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "src/background.js",
@@ -22,6 +23,16 @@
       "js": [
         "src/selectors.js",
         "src/content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/overlay.js"
       ],
       "run_at": "document_idle"
     }

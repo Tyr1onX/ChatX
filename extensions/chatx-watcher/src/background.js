@@ -5,7 +5,10 @@ import {
   confirmDone,
   createEmptyWatcherState,
   getPendingDoneRuns,
+  getRun,
+  getUnpresentedDoneRuns,
   markFinishCandidate,
+  markRunPresented,
   normalizeWatcherState,
   recordActivity,
   startRun,
@@ -13,13 +16,10 @@ import {
 
 const STATE_KEY = "watcherState";
 const SETTINGS_KEY = "settings";
-const COMPLETION_POPUP_URL = chrome.runtime.getURL("popup.html?completion=1");
-const COMPLETION_POPUP_WIDTH = 340;
-const COMPLETION_POPUP_HEIGHT = 168;
 
 let stateCache = null;
 let writeQueue = Promise.resolve();
-let popupCreatePromise = null;
+let presentationPromise = null;
 
 async function loadState() {
   if (stateCache) return stateCache;
@@ -51,50 +51,67 @@ async function isEnabled() {
   return stored[SETTINGS_KEY]?.enabled !== false;
 }
 
-async function getCompletionPopupWindow() {
-  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup"] });
-  return (
-    windows.find((windowInfo) =>
-      windowInfo.tabs?.some((tab) => tab.url === COMPLETION_POPUP_URL)
-    ) ?? null
-  );
+function isEligibleOverlayTab(tab) {
+  if (tab?.id == null || typeof tab.url !== "string") return false;
+  return tab.url.startsWith("http://") || tab.url.startsWith("https://");
 }
 
-async function refreshCompletionPopup() {
+async function getFocusedActiveTab() {
+  let windowInfo;
   try {
-    await chrome.runtime.sendMessage({ type: "COMPLETION_UPDATED" });
+    windowInfo = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
   } catch {
-    // No completion popup is currently open.
+    return null;
+  }
+
+  if (!windowInfo?.focused || windowInfo.id == null) return null;
+
+  const tabs = await chrome.tabs.query({ active: true, windowId: windowInfo.id });
+  const tab = tabs[0] ?? null;
+  return isEligibleOverlayTab(tab) ? tab : null;
+}
+
+async function sendOverlay(tab, run) {
+  if (!isEligibleOverlayTab(tab)) return false;
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "SHOW_COMPLETION_OVERLAY",
+      runId: run.runId,
+      title: run.title?.trim() || "ChatGPT 对话",
+    });
+    return response?.shown === true;
+  } catch {
+    return false;
   }
 }
 
-async function showCompletionPopup() {
-  if (popupCreatePromise) {
-    await popupCreatePromise;
-    await refreshCompletionPopup();
-    return;
-  }
+async function tryPresentPendingCompletionNow() {
+  if (!(await isEnabled())) return { presented: false, reason: "disabled" };
 
-  popupCreatePromise = (async () => {
-    const existing = await getCompletionPopupWindow();
-    if (existing) {
-      await refreshCompletionPopup();
-      return;
-    }
+  const state = await loadState();
+  const run = getUnpresentedDoneRuns(state)[0] ?? null;
+  if (!run) return { presented: false, reason: "none" };
 
-    await chrome.windows.create({
-      url: COMPLETION_POPUP_URL,
-      type: "popup",
-      width: COMPLETION_POPUP_WIDTH,
-      height: COMPLETION_POPUP_HEIGHT,
-      focused: false,
-    });
-  })();
+  const tab = await getFocusedActiveTab();
+  if (!tab) return { presented: false, reason: "no_eligible_active_tab", runId: run.runId };
 
+  const shown = await sendOverlay(tab, run);
+  if (!shown) return { presented: false, reason: "overlay_unavailable", runId: run.runId };
+
+  const marked = markRunPresented(state, run.runId, Date.now());
+  if (marked) await persistState();
+
+  return { presented: Boolean(marked), runId: run.runId, tabId: tab.id };
+}
+
+async function tryPresentPendingCompletion() {
+  if (presentationPromise) return presentationPromise;
+
+  presentationPromise = tryPresentPendingCompletionNow();
   try {
-    await popupCreatePromise;
+    return await presentationPromise;
   } finally {
-    popupCreatePromise = null;
+    presentationPromise = null;
   }
 }
 
@@ -163,25 +180,22 @@ async function handleFinishConfirmed(message, sender) {
   cleanupWatcherState(state, Date.now());
   await persistState();
 
-  if (result.shouldPresent) {
-    await showCompletionPopup();
-  }
+  const presentation = result.shouldPresent
+    ? await tryPresentPendingCompletion()
+    : { presented: false };
 
   return {
     completed: true,
     runId: result.run?.runId ?? null,
     state: result.run?.state ?? null,
-    presented: result.shouldPresent,
+    presented: presentation.presented === true,
   };
 }
 
 async function acknowledgeConversation(conversationId) {
   const state = await loadState();
   const result = acknowledgeRun(state, conversationId, Date.now());
-  if (result.acknowledged) {
-    await persistState();
-    await refreshCompletionPopup();
-  }
+  if (result.acknowledged) await persistState();
   return result;
 }
 
@@ -227,17 +241,6 @@ async function getStatus() {
   };
 }
 
-async function getCompletionData() {
-  const state = await loadState();
-  const pending = getPendingDoneRuns(state);
-  const first = pending[0] ?? null;
-  return {
-    count: pending.length,
-    runId: first?.runId ?? null,
-    title: first?.title?.trim() || "ChatGPT 对话",
-  };
-}
-
 async function setEnabled(enabled) {
   const settings = { enabled: Boolean(enabled) };
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
@@ -247,6 +250,7 @@ async function setEnabled(enabled) {
       .filter((tab) => tab.id != null)
       .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "CONFIG_CHANGED", enabled: settings.enabled }))
   );
+  if (settings.enabled) void tryPresentPendingCompletion();
   return settings;
 }
 
@@ -282,10 +286,24 @@ async function focusConversation(run) {
   return tab;
 }
 
-async function handleViewPendingCompletion() {
+async function hideOverlay(tabId, runId) {
+  if (tabId == null) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "HIDE_COMPLETION_OVERLAY",
+      runId,
+    });
+  } catch {
+    // The source page may have navigated after the user clicked View.
+  }
+}
+
+async function handleOpenCompletion(message, sender) {
   const state = await loadState();
-  const run = getPendingDoneRuns(state)[0] ?? null;
-  if (!run) return { viewed: false, acknowledged: false, remaining: 0 };
+  const run = message.runId ? getRun(state, message.runId) : getPendingDoneRuns(state)[0] ?? null;
+  if (!run || run.state !== RunState.DONE) {
+    return { viewed: false, acknowledged: false, remaining: getPendingDoneRuns(state).length };
+  }
 
   const tab = await focusConversation(run);
   if (!tab) {
@@ -293,6 +311,10 @@ async function handleViewPendingCompletion() {
   }
 
   const result = await acknowledgeConversation(run.conversationId);
+  if (result.acknowledged) {
+    await hideOverlay(sender.tab?.id, run.runId);
+  }
+
   return {
     viewed: true,
     acknowledged: result.acknowledged,
@@ -318,10 +340,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return registerConversation();
       case "GET_STATUS":
         return getStatus();
-      case "GET_COMPLETION_DATA":
-        return getCompletionData();
-      case "VIEW_PENDING_COMPLETION":
-        return handleViewPendingCompletion();
+      case "OPEN_COMPLETION":
+        return handleOpenCompletion(message, sender);
       case "SET_ENABLED":
         return setEnabled(message.enabled);
       default:
@@ -344,6 +364,7 @@ async function requestAckCheck(tabId) {
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void requestAckCheck(tabId);
+  void tryPresentPendingCompletion();
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
@@ -352,6 +373,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     .query({ active: true, windowId })
     .then((tabs) => requestAckCheck(tabs[0]?.id))
     .catch(() => undefined);
+  void tryPresentPendingCompletion();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -362,3 +384,12 @@ chrome.runtime.onInstalled.addListener(() => {
     return undefined;
   });
 });
+
+export {
+  focusConversation,
+  getFocusedActiveTab,
+  handleFinishConfirmed,
+  handleOpenCompletion,
+  isEligibleOverlayTab,
+  tryPresentPendingCompletion,
+};

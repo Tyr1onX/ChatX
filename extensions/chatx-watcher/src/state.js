@@ -44,6 +44,10 @@ export function getPendingDoneRuns(state) {
     .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
 }
 
+export function getUnpresentedDoneRuns(state) {
+  return getPendingDoneRuns(state).filter((run) => run.presentedAt == null);
+}
+
 function mergeMetadata(run, metadata) {
   if (metadata.tabId !== undefined) run.tabId = metadata.tabId;
   if (metadata.windowId !== undefined) run.windowId = metadata.windowId;
@@ -141,9 +145,14 @@ export function confirmDone(state, runId, metadata, now) {
   mergeMetadata(run, metadata);
 
   const shouldPresent = run.presentedAt == null;
-  if (shouldPresent) run.presentedAt = now;
-
   return { run, completed: true, shouldPresent };
+}
+
+export function markRunPresented(state, runId, now) {
+  const run = getRun(state, runId);
+  if (!run || run.state !== RunState.DONE || run.presentedAt != null) return null;
+  run.presentedAt = now;
+  return run;
 }
 
 export function acknowledgeRun(state, conversationId, now) {

@@ -1,117 +1,55 @@
 # ChatX Watcher
 
-ChatX Watcher 是一个极轻量的 ChatGPT 完成提醒器。它完全运行在 Chrome MV3 Extension 内，不需要 Electron、Tauri、第二个 Chromium、原生通知进程或常驻 GUI。
+ChatX Watcher 是一个极轻量的 ChatGPT 完成提醒器。检测逻辑只运行在 ChatGPT 页面；完成提醒显示在用户当前正在看的普通 HTTP/HTTPS 页面右下角。
 
-## v1 产品路径
+## 产品路径
 
 ```text
 RUNNING
--> FINISH_CANDIDATE
--> DONE
--> ChatX Popup
--> 查看对应 conversation
--> ACKNOWLEDGED
+→ FINISH_CANDIDATE
+→ DONE
+→ 当前普通网页 In-Page Overlay
+→ 查看
+→ 对应 ChatGPT conversation
+→ ACKNOWLEDGED
 ```
 
-第一版只保留这一条完成展示路径：
-
-- DONE 时创建一个短生命周期 `chrome.windows.create({ type: "popup" })` 窗口
-- 平时 popup 不存在
-- 多个 completion 优先复用同一个 popup
-- popup 只显示完成数量和 conversation title，不读取 prompt / answer 正文
-- 点击“查看”优先处理最早尚未 ACK 的 DONE run
-- 先按原 `tabId` 定位，失效时回退到 conversation URL，再聚焦对应 Chrome window
-- 成功查看后进入 `ACKNOWLEDGED` 并关闭 popup
-- 用户仅关闭 popup 不等于 ACK；同一个 run 不会再次主动弹出
-
-## 安装（开发版）
-
-1. 打开 Chrome 的 `chrome://extensions/`
-2. 开启“开发者模式”
-3. 选择“加载已解压的扩展程序”
-4. 选择仓库中的 `extensions/chatx-watcher/`
-
-扩展默认中文，默认开启完成提醒。
-
-## 完成判定
-
-第一版继续使用真实环境已经验证过的保守联合条件：
-
-```text
-assistant 区域连续稳定 >= 3 秒
-AND button[data-testid="stop-button"] 不存在
-AND generation busy signals inactive
-AND composer 可正常输入
-AND 已观察到本 run 的 assistant mutation
-AND 再确认 >= 1.5 秒
-```
-
-`/c/WEB:*` 临时 conversation ID 会被忽略。
-
-Selectors 全部集中在 `src/selectors.js`。ChatGPT DOM 变化时优先只调整该文件，不重写状态机。
-
-## Popup
-
-完成 popup 复用扩展现有的 `popup.html / popup.js / popup.css`，通过 `?completion=1` 进入完成提醒模式，因此没有第二套 UI implementation。
-
-字符角色只播放一次短动画：
-
-```text
-[._.]
- /|\
- / \
-
-->
-
-[-_-]
- /|\
- / \
-
-->
-
-[^_^] !
- /|\
- / \
-```
-
-动画只使用两个短 `setTimeout`，总时长低于 1 秒，结束后停止。
-
-## 多个 completion
-
-DONE run 按 `completedAt` 从早到晚排序。已有 completion popup 时不会为每个 run 新建窗口，而是刷新同一个 popup；“查看”始终处理最早的 DONE run，行为确定且不引入任务中心。
-
-## 资源设计
-
-```text
-Idle popup: 不存在
-Polling: none
-Persistent animation timer: none
-Background network traffic: none
-Extra Chromium: none
-Extra native process: none
-```
-
-生成期间仍只使用 detector 自己的稳定窗口 timer 和短确认 timer；没有周期性网络请求或页面 polling。
+- ChatGPT detector 只匹配 `https://chatgpt.com/*`。
+- 普通网页只加载轻量 Overlay message listener，不扫描 DOM。
+- Overlay 使用 Shadow DOM，不创建独立 Chrome completion window。
+- 点击“×”只关闭当前提醒，不 ACK，也不会重复主动提醒同一个 run。
+- 点击“查看”后由 Background 复用唯一的 `focusConversation()`，成功后 ACK 并移除 Overlay。
+- `chrome://`、Chrome Web Store 等受保护页面无法注入时，DONE 保持 pending；用户之后进入可注入页面时再事件驱动展示。
 
 ## 权限
 
 ```text
 storage
 tabs
-host: https://chatgpt.com/*
+http://*/*
+https://*/*
 ```
 
-不需要 `notifications`，也不使用 `<all_urls>`。
+HTTP/HTTPS 权限仅用于在当前普通网页显示完成提醒。普通网页脚本不读取正文、表单或剪贴板，不执行网络请求，也不使用 MutationObserver。
 
-## 隐私
+## 资源设计
 
-持久化状态只包含：
+```text
+Polling: none
+Persistent timers: none
+Persistent animation: none
+Ordinary-page MutationObserver: 0
+Network: none
+Extra browser runtime: none
+Extra native process: none
+Overlay when idle: absent
+```
 
-- `conversationId`
-- `runId`
-- state
-- `tabId` / `windowId`
-- conversation URL / title
-- 时间戳
+字符动画只播放一次：`[._.] → [-_-] → [^_^] !`，使用两个短 `setTimeout` 后完全停止。
 
-最多保留 80 个 run，并对旧状态使用 14 天 TTL。不会保存 ChatGPT 消息正文、Cookie 或 token。
+## 安装（开发版）
+
+1. 打开 `chrome://extensions/`。
+2. 开启“开发者模式”。
+3. 选择“加载已解压的扩展程序”。
+4. 选择仓库中的 `extensions/chatx-watcher/`。
