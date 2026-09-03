@@ -13,6 +13,7 @@ beforeAll(() => {
   write(root, "src/auth.ts", "export function login() { return 'needle-alpha'; }\n");
   write(root, "src/deep/nested.ts", `// needle-alpha appears here too\n${globMarker}\n`);
   write(root, "src/root.ts", `${globMarker}\n`);
+  write(root, "src/upper.TS", `${globMarker}\n`);
   write(root, "root.ts", `${globMarker}\n`);
   write(
     root,
@@ -160,7 +161,7 @@ describe.each(engines())("search engine: %s", (engine) => {
     expect(paths.some((p) => p.endsWith(".ts"))).toBe(false);
   });
 
-  it("matches root and nested files for recursive globs", async () => {
+  it("matches root and nested files for recursive globs without changing glob case", async () => {
     configure();
     const result = await searchWorkspace(ws, { query: globMarker, glob: "**/*.ts" });
     const paths = result.matches.map((match) => match.path).sort();
