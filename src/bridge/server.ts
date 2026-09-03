@@ -217,6 +217,11 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   });
 
   app.get("/admin/info", adminGuard, (_req, res) => {
+    const tunnelStatus = tunnel.status();
+    if (!tunnelStatus.running && publicBaseUrl) {
+      publicBaseUrl = null;
+      persistRuntime();
+    }
     res.json({
       service: SERVICE_NAME,
       version: VERSION,
@@ -225,7 +230,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       workspaceRoot: workspace.root,
       port,
       publicUrl: publicBaseUrl,
-      tunnel: tunnel.status(),
+      tunnel: tunnelStatus,
       tokenCount: authStore.tokenCount(),
       pairingActive: pairing.hasActiveSession(),
       pid: process.pid,
