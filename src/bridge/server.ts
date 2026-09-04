@@ -93,6 +93,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   const browser = new BrowserController();
   const processes = new ProcessSessionManager(workspace);
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
+  const instanceId = randomBytes(16).toString("base64url");
 
   let publicBaseUrl: string | null = null;
   let tunnelStartPromise: Promise<string> | null = null;
@@ -117,7 +118,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     tunnelStartPromise = (async () => {
       const status = tunnel.status();
       if (status.running && status.url) {
-        const health = await probeBridgeHealth(status.url, workspace.id, 8000);
+        const health = await probeBridgeHealth(status.url, workspace.id, 8000, instanceId);
         if (health) {
           publicBaseUrl = status.url;
           persistRuntime();
@@ -175,7 +176,13 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   };
 
   app.get("/health", (_req, res) => {
-    res.json({ service: SERVICE_NAME, version: VERSION, workspaceId: workspace.id, status: "ok" });
+    res.json({
+      service: SERVICE_NAME,
+      version: VERSION,
+      workspaceId: workspace.id,
+      instanceId,
+      status: "ok",
+    });
   });
 
   app.use(
@@ -230,6 +237,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       service: SERVICE_NAME,
       version: VERSION,
       workspaceId: workspace.id,
+      instanceId,
       workspaceName: workspace.name,
       workspaceRoot: workspace.root,
       port,
@@ -296,6 +304,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       adminToken,
       publicUrl: publicBaseUrl,
       startedAt,
+      instanceId,
     };
     writeRuntimeState(state);
   };
