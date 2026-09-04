@@ -10,8 +10,21 @@ body {
 
 main { padding: 14px; }
 
+.brand-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.brand-header img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
 h1 {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 18px;
 }
 

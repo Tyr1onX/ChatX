@@ -1395,7 +1395,7 @@ async function assignAgent(role, tabId) {
   return getPublicUiState();
 }
 
-async function startFromPopup({ task, maxRounds, maxGenerations, triggerTabId }) {
+async function startFromUi({ task, maxRounds, maxGenerations, triggerTabId }) {
   await assertFeatureEnabled();
   const cleanTask = typeof task === "string" ? task.trim() : "";
   if (!cleanTask) throw new Error("TASK_REQUIRED");
@@ -1476,9 +1476,10 @@ async function onTurnFailed(message, sender) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (typeof message?.type === "string" && message.type.startsWith("BRIDGE_")) {
-    const isPopup = !sender.tab && typeof sender.url === "string" && sender.url.endsWith("/popup.html");
-    if (!isPopup) {
-      sendResponse({ ok: false, error: "POPUP_ONLY_ACTION" });
+    const isPopup = sender.id === chrome.runtime.id && !sender.tab && typeof sender.url === "string" && sender.url.endsWith("/popup.html");
+    const contentTabId = sender.id === chrome.runtime.id && isChatGptTab(sender.tab) ? sender.tab.id : null;
+    if (!isPopup && !Number.isInteger(contentTabId)) {
+      sendResponse({ ok: false, error: "UI_ONLY_ACTION" });
       return false;
     }
     void (async () => {
@@ -1487,9 +1488,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === "BRIDGE_UI_STATE") {
           state = await getPublicUiState();
         } else if (message.type === "BRIDGE_ASSIGN") {
-          state = await assignAgent(message.role, message.tabId);
+          state = await assignAgent(message.role, message.tabId ?? contentTabId);
         } else if (message.type === "BRIDGE_START") {
-          state = await startFromPopup(message);
+          state = await startFromUi({ ...message, triggerTabId: message.triggerTabId ?? contentTabId });
         } else if (message.type === "BRIDGE_STOP") {
           state = await stopUser();
         } else {

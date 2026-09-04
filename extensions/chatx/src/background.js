@@ -7,17 +7,23 @@ const Features = globalThis.ChatXFeatures;
 
 await Features.ensure();
 
-function isPopupSender(sender) {
-  return sender.id === chrome.runtime.id
-    && !sender.tab
-    && typeof sender.url === "string"
-    && sender.url.endsWith("/popup.html");
+function isUiSender(sender) {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (!sender.tab) {
+    return typeof sender.url === "string" && sender.url.endsWith("/popup.html");
+  }
+  try {
+    const url = new URL(sender.url || sender.tab.url || "");
+    return url.protocol === "https:" && url.hostname === "chatgpt.com";
+  } catch {
+    return false;
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "CHATX_GET_FEATURES" && message?.type !== "CHATX_SET_FEATURE") return false;
-  if (!isPopupSender(sender)) {
-    sendResponse({ ok: false, error: "POPUP_ONLY_ACTION" });
+  if (!isUiSender(sender)) {
+    sendResponse({ ok: false, error: "UI_ONLY_ACTION" });
     return false;
   }
 

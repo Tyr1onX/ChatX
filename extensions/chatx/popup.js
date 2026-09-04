@@ -1,20 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const Features = globalThis.ChatXFeatures;
+const Ui = globalThis.ChatXUiApi;
 
 let features = { ...Features.DEFAULTS };
 let currentState = null;
 let bridgeInitialized = false;
-
-async function popupMessage(type, payload = {}) {
-  const response = await chrome.runtime.sendMessage({ type, ...payload });
-  if (!response?.ok) throw new Error(response?.error || "ACTION_FAILED");
-  return response;
-}
-
-async function bridge(type, payload = {}) {
-  const response = await popupMessage(type, payload);
-  return response.state;
-}
 
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -26,23 +16,6 @@ function showNotice(text) {
   const notice = $("notice");
   notice.textContent = text || "";
   notice.hidden = !text;
-}
-
-function friendlyError(error) {
-  const code = error instanceof Error ? error.message : String(error);
-  const messages = {
-    CURRENT_TAB_NOT_CHATGPT: "Open a ChatGPT tab to assign this role.",
-    DEVELOPER_AND_AUDITOR_MUST_DIFFER: "Developer and Auditor must use different ChatGPT tabs.",
-    STOP_CURRENT_RUN_BEFORE_REASSIGN: "Stop the current run before changing Agent tabs.",
-    TASK_REQUIRED: "Task is required.",
-    AGENTS_MISSING: "Assign both Developer and Auditor first.",
-    START_FROM_NON_AGENT_TAB: "Start from a non-Agent tab.",
-    TRIGGER_TAB_NOT_FOREGROUND: "Start from the current foreground non-Agent tab.",
-    AGENT_TAB_ACTIVE_AT_START: "Developer and Auditor must both be inactive before Start.",
-    RUN_ALREADY_ACTIVE: "A run is already active.",
-    AGENT_BRIDGE_DISABLED: "Agent Bridge is off.",
-  };
-  return messages[code] || code;
 }
 
 function updateStartEnabled() {
@@ -91,25 +64,23 @@ function renderFeatures() {
 async function refreshBridge({ hydrate = false } = {}) {
   if (!features.agentBridge) return;
   try {
-    const state = await bridge("BRIDGE_UI_STATE");
+    const state = await Ui.getBridgeState();
     renderBridge(state, hydrate || !bridgeInitialized);
     bridgeInitialized = true;
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 }
 
 async function refreshFeatures() {
-  const response = await popupMessage("CHATX_GET_FEATURES");
-  features = Features.normalize(response.features);
+  features = await Ui.getFeatures();
   renderFeatures();
 }
 
 async function setFeature(name, enabled, input) {
   input.disabled = true;
   try {
-    const response = await popupMessage("CHATX_SET_FEATURE", { feature: name, enabled });
-    features = Features.normalize(response.features);
+    features = await Ui.setFeature(name, enabled);
     renderFeatures();
     if (name === "agentBridge" && features.agentBridge) {
       bridgeInitialized = false;
@@ -117,7 +88,7 @@ async function setFeature(name, enabled, input) {
     }
   } catch (error) {
     input.checked = !enabled;
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   } finally {
     input.disabled = false;
   }
@@ -139,9 +110,9 @@ $("assignDeveloper").addEventListener("click", async () => {
   try {
     showNotice("");
     const tab = await activeTab();
-    renderBridge(await bridge("BRIDGE_ASSIGN", { role: "developer", tabId: tab.id }));
+    renderBridge(await Ui.assign("developer", tab.id));
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 });
 
@@ -149,9 +120,9 @@ $("assignAuditor").addEventListener("click", async () => {
   try {
     showNotice("");
     const tab = await activeTab();
-    renderBridge(await bridge("BRIDGE_ASSIGN", { role: "auditor", tabId: tab.id }));
+    renderBridge(await Ui.assign("auditor", tab.id));
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 });
 
@@ -159,23 +130,23 @@ $("start").addEventListener("click", async () => {
   try {
     showNotice("");
     const tab = await activeTab();
-    renderBridge(await bridge("BRIDGE_START", {
+    renderBridge(await Ui.start({
       task: $("task").value.trim(),
       maxRounds: Number.parseInt($("maxRounds").value, 10),
       maxGenerations: Number.parseInt($("maxGenerations").value, 10),
       triggerTabId: tab.id,
     }));
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 });
 
 $("stop").addEventListener("click", async () => {
   try {
     showNotice("");
-    renderBridge(await bridge("BRIDGE_STOP"));
+    renderBridge(await Ui.stop());
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 });
 
@@ -199,6 +170,6 @@ void (async () => {
     await refreshFeatures();
     await refreshBridge({ hydrate: true });
   } catch (error) {
-    showNotice(friendlyError(error));
+    showNotice(Ui.friendlyError(error));
   }
 })();

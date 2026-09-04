@@ -32,9 +32,71 @@ describe("ChatX unified browser extension", () => {
     expect(popup).toContain('setFeature("sessionGuard"');
     expect(popup).toContain('setFeature("agentBridge"');
     expect(popup).toContain('$("agentBridgeControls").hidden = !features.agentBridge');
-    expect(popup).toContain('bridge("BRIDGE_STOP")');
+    expect(popup).toContain("Ui.stop()");
     for (const forbidden of ["timeline", "requestId", "tabId", "completion marker", "storage 原始状态"]) {
       expect(html).not.toContain(forbidden);
+    }
+  });
+
+  it("adds one ChatGPT-only floating launcher backed by the same UI API", () => {
+    const html = read("popup.html");
+    const popup = read("popup.js");
+    const uiApi = read("src/ui-api.js");
+    const floating = read("src/floating-ui.js");
+    const background = read("src/background.js");
+    const bridgeBackground = read("src/agent-bridge/background.js");
+    const manifest = JSON.parse(read("manifest.json")) as {
+      action: { default_icon: Record<string, string> };
+      icons: Record<string, string>;
+      content_scripts: Array<{ matches: string[]; js: string[] }>;
+      web_accessible_resources: Array<{ resources: string[]; matches: string[] }>;
+    };
+
+    expect(html).toContain('src="icons/icon32.png"');
+    expect(html).toContain('src="src/ui-api.js"');
+    expect(popup).toContain("const Ui = globalThis.ChatXUiApi");
+    expect(popup).not.toContain("chrome.runtime.sendMessage");
+    expect(floating).toContain('const HOST_ID = "chatx-floating-controls"');
+    expect(floating).toContain('panel.className = "panel"');
+    expect(floating).toContain("panel.hidden = true");
+    expect(floating).toContain('launcher.setAttribute("aria-expanded", "false")');
+    expect(floating).toContain('$("agentBridgeControls").hidden = !features.agentBridge');
+    expect(floating).toContain('Ui.setFeature(name, enabled)');
+    expect(floating).toContain('Ui.assign("developer")');
+    expect(floating).toContain('Ui.assign("auditor")');
+    expect(floating).toContain("Ui.start({");
+    expect(floating).toContain("Ui.stop()");
+    for (const label of ["Watcher", "Session Guard", "Agent Bridge", "Developer:", "Auditor:", "Task", "Max rounds", "Max generations", "status", "generation", "round"]) {
+      expect(floating).toContain(label);
+    }
+    for (const forbidden of ["timeline", "requestId", "completion marker", "storage 原始状态"]) {
+      expect(floating).not.toContain(forbidden);
+    }
+
+    expect(uiApi).toContain('message("CHATX_GET_FEATURES")');
+    expect(uiApi).toContain('message("CHATX_SET_FEATURE"');
+    expect(uiApi).toContain('message("BRIDGE_UI_STATE")');
+    expect(uiApi).toContain('message("BRIDGE_ASSIGN"');
+    expect(uiApi).toContain('message("BRIDGE_START"');
+    expect(uiApi).toContain('message("BRIDGE_STOP")');
+    expect(background).toContain("function isUiSender(sender)");
+    expect(background).toContain('url.hostname === "chatgpt.com"');
+    expect(bridgeBackground).toContain("isChatGptTab(sender.tab)");
+    expect(bridgeBackground).toContain("message.tabId ?? contentTabId");
+    expect(bridgeBackground).toContain("message.triggerTabId ?? contentTabId");
+
+    expect(manifest.content_scripts[2].matches).toEqual(["https://chatgpt.com/*"]);
+    expect(manifest.content_scripts[2].js).toContain("src/ui-api.js");
+    expect(manifest.content_scripts[2].js).toContain("src/floating-ui.js");
+    expect(manifest.web_accessible_resources).toEqual([{
+      resources: ["icons/icon32.png"],
+      matches: ["https://chatgpt.com/*"],
+    }]);
+    expect(manifest.action.default_icon).toEqual(manifest.icons);
+    expect(Object.keys(manifest.icons).sort()).toEqual(["128", "16", "32", "48"].sort());
+    expect(fs.existsSync(path.join(extensionRoot, "icons", "chatx.svg"))).toBe(true);
+    for (const size of [16, 32, 48, 128]) {
+      expect(fs.statSync(path.join(extensionRoot, "icons", `icon${size}.png`)).size).toBeGreaterThan(0);
     }
   });
 
@@ -163,6 +225,8 @@ describe("ChatX unified browser extension", () => {
     const files = [
       "src/background.js",
       "src/features.js",
+      "src/ui-api.js",
+      "src/floating-ui.js",
       "src/watcher/background.js",
       "src/watcher/content.js",
       "src/watcher/overlay.js",
