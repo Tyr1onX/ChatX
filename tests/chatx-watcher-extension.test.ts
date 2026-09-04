@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const extensionRoot = path.join(repoRoot, "extensions", "chatx-watcher");
+const extensionRoot = path.join(repoRoot, "extensions", "chatx");
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.join(extensionRoot, relativePath), "utf8");
@@ -12,11 +12,11 @@ function read(relativePath: string): string {
 
 function runtimeSource(): string {
   return [
-    read("src/content.js"),
-    read("src/background.js"),
-    read("src/state.js"),
-    read("src/selectors.js"),
-    read("src/overlay.js"),
+    read("src/watcher/content.js"),
+    read("src/watcher/background.js"),
+    read("src/watcher/state.js"),
+    read("src/watcher/selectors.js"),
+    read("src/watcher/overlay.js"),
     read("popup.js"),
   ].join("\n");
 }
@@ -34,17 +34,17 @@ describe("ChatX Watcher extension constraints", () => {
     expect(manifest.permissions.sort()).toEqual(["storage", "tabs"].sort());
     expect(manifest.permissions).not.toContain("notifications");
     expect(manifest.host_permissions.sort()).toEqual(["http://*/*", "https://*/*"].sort());
-    expect(manifest.content_scripts).toHaveLength(2);
+    expect(manifest.content_scripts).toHaveLength(4);
     expect(manifest.content_scripts[0].matches).toEqual(["https://chatgpt.com/*"]);
-    expect(manifest.content_scripts[0].js).toEqual(["src/selectors.js", "src/content.js"]);
-    expect(manifest.content_scripts[1].matches.sort()).toEqual(["http://*/*", "https://*/*"].sort());
-    expect(manifest.content_scripts[1].js).toEqual(["src/overlay.js"]);
+    expect(manifest.content_scripts[2].js).toContain("src/watcher/content.js");
+    expect(manifest.content_scripts[3].matches.sort()).toEqual(["http://*/*", "https://*/*"].sort());
+    expect(manifest.content_scripts[3].js).toContain("src/watcher/overlay.js");
     expect(JSON.stringify(manifest)).not.toContain("<all_urls>");
   });
 
   it("uses only the in-page completion overlay path", () => {
-    const background = read("src/background.js");
-    const overlay = read("src/overlay.js");
+    const background = read("src/watcher/background.js");
+    const overlay = read("src/watcher/overlay.js");
     const popup = read("popup.js");
     const source = runtimeSource();
 
@@ -66,7 +66,7 @@ describe("ChatX Watcher extension constraints", () => {
   });
 
   it("selects the focused normal window active http/https tab and retries from focus events", () => {
-    const background = read("src/background.js");
+    const background = read("src/watcher/background.js");
 
     expect(background).toContain('getLastFocused({ windowTypes: ["normal"] })');
     expect(background).toContain("if (!windowInfo?.focused");
@@ -80,8 +80,8 @@ describe("ChatX Watcher extension constraints", () => {
   });
 
   it("keeps close separate from ACK and delegates View to Background", () => {
-    const background = read("src/background.js");
-    const overlay = read("src/overlay.js");
+    const background = read("src/watcher/background.js");
+    const overlay = read("src/watcher/overlay.js");
 
     expect(overlay).toContain('close.addEventListener("click", () => removeOverlay(runId))');
     expect(overlay).not.toContain("ACK_ELIGIBLE");
@@ -93,7 +93,7 @@ describe("ChatX Watcher extension constraints", () => {
 
   it("uses a single Shadow DOM host and a one-shot animation without polling or network", () => {
     const source = runtimeSource();
-    const overlay = read("src/overlay.js");
+    const overlay = read("src/watcher/overlay.js");
 
     expect(overlay).toContain('const HOST_ID = "chatx-completion-overlay"');
     expect(overlay).toContain("removeOverlay();");
@@ -116,7 +116,7 @@ describe("ChatX Watcher extension constraints", () => {
   });
 
   it("uses a bounded number of event-driven DOM observers", () => {
-    const content = read("src/content.js");
+    const content = read("src/watcher/content.js");
     const observerCount = content.match(/new MutationObserver\s*\(/g)?.length ?? 0;
 
     expect(observerCount).toBeGreaterThan(0);
@@ -124,8 +124,8 @@ describe("ChatX Watcher extension constraints", () => {
   });
 
   it("matches the current ChatGPT generation control without sidebar cancel false positives", () => {
-    const selectors = read("src/selectors.js");
-    const content = read("src/content.js");
+    const selectors = read("src/watcher/selectors.js");
+    const content = read("src/watcher/content.js");
 
     expect(selectors).toContain('button[data-testid="stop-button"]');
     expect(selectors).not.toContain('aria-label*="取消"');

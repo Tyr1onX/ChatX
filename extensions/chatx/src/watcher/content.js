@@ -394,9 +394,9 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "CONFIG_CHANGED") {
-      setEnabled(message.enabled);
-    } else if (message?.type === "ACK_CHECK") {
+    if (message?.type === "ACK_CHECK") {
+
+
       scheduleAcknowledgeCheck();
     }
   });
@@ -405,7 +405,12 @@
   window.addEventListener("focus", scheduleAcknowledgeCheck, { passive: true });
   window.addEventListener("popstate", () => void syncConversation());
 
-  chrome.storage.local.get({ settings: { enabled: true } }, ({ settings }) => {
-    setEnabled(settings?.enabled !== false);
+  void globalThis.ChatXFeatures.get().then((features) => {
+    setEnabled(features.watcher);
+  });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[globalThis.ChatXFeatures.KEY]) return;
+    const next = globalThis.ChatXFeatures.normalize(changes[globalThis.ChatXFeatures.KEY].newValue);
+    setEnabled(next.watcher);
   });
 })();

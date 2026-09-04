@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatX</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>ChatX</h1>
+
+    <label class="feature-row">
+      <span><strong>Watcher</strong><small>后台任务完成提醒</small></span>
+      <input id="watcherToggle" type="checkbox">
+    </label>
+
+    <label class="feature-row">
+      <span><strong>Session Guard</strong><small>长会话性能保护</small></span>
+      <input id="sessionGuardToggle" type="checkbox">
+    </label>
+
+    <label class="feature-row">
+      <span><strong>Agent Bridge</strong><small>Developer / Auditor 自动协作</small></span>
+      <input id="agentBridgeToggle" type="checkbox">
+    </label>
+
+    <section id="agentBridgeControls" hidden>
+      <div class="agents">
+        <div>Developer: <strong id="developerState">missing</strong></div>
+        <div>Auditor: <strong id="auditorState">missing</strong></div>
+      </div>
+
+      <label for="task">Task</label>
+      <textarea id="task" rows="4" required></textarea>
+
+      <div class="budget-grid">
+        <label for="maxRounds">Max rounds
+          <input id="maxRounds" type="number" min="1" step="1" value="6">
+        </label>
+        <label for="maxGenerations">Max generations
+          <input id="maxGenerations" type="number" min="1" step="1" value="3">
+        </label>
+      </div>
+
+      <div class="button-grid">
+        <button id="assignDeveloper" type="button">Assign Developer</button>
+        <button id="assignAuditor" type="button">Assign Auditor</button>
+        <button id="start" type="button">Start</button>
+        <button id="stop" type="button">Stop</button>
+      </div>
+
+      <div class="runtime" aria-live="polite">
+        <div>status <strong id="status">IDLE</strong></div>
+        <div>generation <strong id="generation">1</strong></div>
+        <div>round <strong id="round">0</strong></div>
+        <div id="errorRow" hidden>error <strong id="error"></strong></div>
+      </div>
+
+      <p id="notice" role="status" aria-live="polite" hidden></p>
+    </section>
+  </main>
+  <script src="src/features.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
