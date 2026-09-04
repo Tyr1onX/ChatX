@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStore } from "../src/auth/store.js";
-import { endpointFile, readLastEndpoint, writeLastEndpoint } from "../src/config/endpoint.js";
+import { confirmConnectorEndpoint, endpointFile, readLastEndpoint, writeLastEndpoint } from "../src/config/endpoint.js";
 import { appendExecutionRecord, readExecutionRecords } from "../src/execution/records.js";
 import { readSession, sessionFile, writeSession } from "../src/session/state.js";
 import { readTunnelState, tunnelStateFile, writeTunnelState } from "../src/tunnel/state.js";
+import { TOOLSET_VERSION } from "../src/version.js";
 import { Workspace, workspaceIdForCanonicalRoot } from "../src/workspace/manager.js";
 import { migrateWorkspaceDirectory, WorkspaceMigrationError } from "../src/workspace/migration.js";
 import { cleanup, makeTmpDir, write } from "./helpers.js";
@@ -124,6 +125,60 @@ describe("workspace directory migration", () => {
     expect(fs.existsSync(endpointFile(workspace.id))).toBe(false);
     expect(fs.existsSync(sessionFile(workspace.id))).toBe(false);
     expect(fs.existsSync(tunnelStateFile(workspace.id))).toBe(false);
+  });
+
+  it("rebinds connector confirmation to the renamed workspace without changing connection identity", () => {
+    const { parent, workspace } = setupWorkspace();
+    const fixedPublicUrl = "https://c2c-demo.example.com";
+    const fixedMcpUrl = `${fixedPublicUrl}/mcp`;
+    const tunnelId = "22222222-2222-2222-2222-222222222222";
+    const tunnelName = `c2c-${workspace.id}`;
+    const hostname = "c2c-demo.example.com";
+
+    writeLastEndpoint({
+      workspaceId: workspace.id,
+      port: 48765,
+      publicUrl: fixedPublicUrl,
+      mcpUrl: fixedMcpUrl,
+      connectorMcpUrl: fixedMcpUrl,
+      connectorName: "ChatX · Old-Workspace",
+      actionsVersion: TOOLSET_VERSION,
+    });
+    writeTunnelState({
+      workspaceId: workspace.id,
+      preference: "named",
+      provider: "cloudflare-named",
+      tunnelName,
+      tunnelId,
+      hostname,
+      zone: "example.com",
+    });
+
+    const result = migrateWorkspaceDirectory(workspace.root);
+    const migrated = new Workspace(path.join(parent, "ChatX-Workspace"));
+    expect(result.newWorkspaceId).toBe(migrated.id);
+
+    expect(readLastEndpoint(migrated.id)).toMatchObject({
+      workspaceId: migrated.id,
+      mcpUrl: fixedMcpUrl,
+      connectorMcpUrl: fixedMcpUrl,
+      connectorName: "ChatX · Old-Workspace",
+    });
+
+    const confirmed = confirmConnectorEndpoint(migrated.id, migrated.name);
+    expect(confirmed).toMatchObject({
+      workspaceId: migrated.id,
+      mcpUrl: fixedMcpUrl,
+      connectorMcpUrl: fixedMcpUrl,
+      connectorName: "ChatX · ChatX-Workspace",
+      actionsVersion: TOOLSET_VERSION,
+    });
+    expect(readTunnelState(migrated.id)).toMatchObject({
+      workspaceId: migrated.id,
+      tunnelName,
+      tunnelId,
+      hostname,
+    });
   });
 
   it("does not roll back committed migration when stale-state cleanup fails", () => {

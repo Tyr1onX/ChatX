@@ -93,6 +93,14 @@ export function isLegacyConnectorName(name: string | null | undefined): boolean 
   return Boolean(value && (value === LEGACY_CONNECTOR_NAME || value.startsWith(`${LEGACY_CONNECTOR_NAME} · `)));
 }
 
+function isManagedConnectorName(name: string | null | undefined): boolean {
+  const value = name?.trim();
+  return Boolean(
+    value &&
+      (isLegacyConnectorName(value) || value === DEFAULT_CONNECTOR_NAME || value.startsWith(`${DEFAULT_CONNECTOR_NAME} · `))
+  );
+}
+
 /** Remove legacy branding from anything that may be shown to a user. */
 export function connectorDisplayName(name: string | null | undefined): string | null {
   const value = name?.trim();
@@ -104,7 +112,7 @@ export function connectorDisplayName(name: string | null | undefined): string | 
   return value;
 }
 
-/** Desired current connector title. Legacy titles are never returned. */
+/** Desired current connector title. ChatX-managed titles always follow the current workspace name. */
 export function connectorNameFor(opts: {
   workspaceName: string;
   workspaceId: string;
@@ -112,10 +120,7 @@ export function connectorNameFor(opts: {
   hadEndpointBefore: boolean;
 }): string {
   const previous = opts.previousName?.trim();
-  if (previous && !isLegacyConnectorName(previous)) return previous;
-  if (previous?.startsWith(`${LEGACY_CONNECTOR_NAME} · `)) {
-    return `${DEFAULT_CONNECTOR_NAME} · ${previous.slice(`${LEGACY_CONNECTOR_NAME} · `.length)}`;
-  }
+  if (previous && !isManagedConnectorName(previous)) return previous;
   return `${DEFAULT_CONNECTOR_NAME} · ${sanitizeConnectorLabel(opts.workspaceName, opts.workspaceId)}`;
 }
 

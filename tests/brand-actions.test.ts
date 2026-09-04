@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   actionsRefreshDecision,
   confirmConnectorEndpoint,
+  connectorNameFor,
   connectorNeedsBrandMigration,
   connectorRepairDecision,
   readLastEndpoint,
@@ -33,6 +34,33 @@ describe("ChatX connector brand/toolset migration", () => {
         true
       )
     ).toEqual({ action: "update", reason: "brand_migration" });
+  });
+
+  it("rebinds ChatX-managed connector names to the current workspace while preserving custom names", () => {
+    expect(
+      connectorNameFor({
+        workspaceName: "ChatX-Workspace",
+        workspaceId: "abc123abc123",
+        previousName: "Codex with ChatGPT · Old-Workspace",
+        hadEndpointBefore: true,
+      })
+    ).toBe("ChatX · ChatX-Workspace");
+    expect(
+      connectorNameFor({
+        workspaceName: "ChatX-Workspace",
+        workspaceId: "abc123abc123",
+        previousName: "ChatX · Old-Workspace",
+        hadEndpointBefore: true,
+      })
+    ).toBe("ChatX · ChatX-Workspace");
+    expect(
+      connectorNameFor({
+        workspaceName: "ChatX-Workspace",
+        workspaceId: "abc123abc123",
+        previousName: "My custom connector",
+        hadEndpointBefore: true,
+      })
+    ).toBe("My custom connector");
   });
 
   it("prompts for Actions when a saved connector predates the current toolset version", () => {
