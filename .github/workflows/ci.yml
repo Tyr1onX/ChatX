@@ -57,7 +57,17 @@ jobs:
             await browser.close();
           }
           NODE
-      - name: Production dependency audit
-        run: corepack pnpm audit --prod
       - name: Release package smoke
         run: corepack pnpm release:smoke
+
+  audit:
+    name: Production dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Audit production dependencies
+        run: corepack pnpm@11.25.0 audit --prod --pm-on-fail=ignore
