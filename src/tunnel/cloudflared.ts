@@ -42,11 +42,15 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
       this.child = child;
       this.url = null;
       this.lastError = null;
+      let established = false;
+      let childLastError: string | null = null;
 
       const timeout = setTimeout(() => {
-        if (this.url) return;
-        this.logger.error("Quick tunnel did not produce a URL within 45s");
-        child.kill("SIGTERM");
+        if (established) return;
+        if (this.child === child) {
+          this.logger.error("Quick tunnel did not produce a URL within 45s");
+          child.kill("SIGTERM");
+        }
         reject(new Error("Tunnel start timed out"));
       }, 45_000);
 
@@ -54,15 +58,19 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
         const rl = readline.createInterface({ input: stream });
         rl.on("line", (line) => {
           const url = parseQuickTunnelUrl(line);
-          if (url && !this.url) {
+          if (url && this.child === child && !established) {
+            established = true;
             this.url = url;
             clearTimeout(timeout);
             this.logger.info(`Quick tunnel established: ${url}`);
             resolve(url);
           }
           if (/error/i.test(line)) {
-            this.lastError = line.slice(0, 400);
-            this.logger.debug(`cloudflared: ${line.slice(0, 400)}`);
+            childLastError = line.slice(0, 400);
+            if (this.child === child) {
+              this.lastError = childLastError;
+              this.logger.debug(`cloudflared: ${childLastError}`);
+            }
           }
         });
       };
@@ -71,20 +79,25 @@ export class CloudflaredQuickTunnel implements TunnelProvider {
 
       child.on("error", (error) => {
         clearTimeout(timeout);
-        this.child = null;
+        if (this.child === child) {
+          this.child = null;
+          this.url = null;
+        }
         reject(error);
       });
       child.on("exit", (code) => {
         clearTimeout(timeout);
-        const wasStarting = this.url === null;
+        const wasStarting = !established;
         this.logger.warn(`cloudflared exited with code ${code}`);
-        this.child = null;
-        this.url = null;
+        if (this.child === child) {
+          this.child = null;
+          this.url = null;
+        }
         if (wasStarting) {
           reject(
             new Error(
               `cloudflared exited (code ${code}) before establishing a tunnel${
-                this.lastError ? `: ${this.lastError}` : ""
+                childLastError ? `: ${childLastError}` : ""
               }`
             )
           );
