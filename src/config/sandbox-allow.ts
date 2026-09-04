@@ -48,7 +48,7 @@ export function isStateDirAllowlisted(content: string, stateDir: string): boolea
 }
 
 /**
- * Idempotently add the C2C state directory to Codex's sandbox writable_roots.
+ * Idempotently add the ChatX state directory to Codex's sandbox writable_roots.
  * Works on macOS, Windows, and Linux. Never rewrites unrelated config.
  */
 export function ensureSandboxAllowlist(opts?: {

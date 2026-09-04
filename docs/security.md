@@ -37,7 +37,7 @@ New authorizations expose narrow scopes:
 | Token theft from state file | Persisted token records contain SHA-256 hashes rather than raw bearer/refresh tokens. Access tokens expire; refresh tokens rotate. |
 | Workspace path traversal | Canonical realpath containment; absolute escapes, `..`, symlink escapes, backslash tricks and null bytes are rejected/tested. |
 | Sensitive-file disclosure | Deny patterns cover `.env*` (except `.env.example`), private keys, SSH/cloud credential directories, `.npmrc`, service-account files and related secrets. Git diff also excludes sensitive paths. |
-| Project-specific sensitive data | `.chatxignore` adds deny rules. `.c2cignore` remains supported for compatibility. |
+| Project-specific sensitive data | `.chatxignore` adds deny rules. The previous ignore filename remains accepted for compatibility. |
 | Oversized output / response DoS | File/diff/search limits; `write_file` max 1 MiB; command stdout/stderr capped; command timeout max 120 s. |
 | Implicit shell injection | `run_command` uses `spawn(command, args, { shell:false })`. **However, callers may explicitly launch `cmd.exe`, `powershell.exe`, `bash`, etc. when authorized, which is equivalent to shell execution.** |
 | Command escaping workspace | The `cwd` is workspace-contained, but the executable is not OS-sandboxed. `process.run` must be treated as high privilege. |
@@ -66,9 +66,9 @@ ChatGPT
 
 ## Local state and compatibility
 
-State is stored with owner-oriented filesystem permissions where supported. During the current alpha line, the default directory intentionally remains the legacy `codex-with-chatgpt` state directory so existing OAuth tokens, connector metadata and sessions survive the ChatX rename. `CHATX_STATE_DIR` is the preferred override; `C2C_STATE_DIR` remains accepted.
+State is stored with owner-oriented filesystem permissions where supported. During the current alpha line, the previous default state directory is intentionally reused so existing OAuth tokens, connector metadata and sessions survive the ChatX rename. `CHATX_STATE_DIR` is the preferred override; the previous override name remains accepted internally.
 
-Token prefixes (`c2c_at`, `c2c_rt`, etc.) are also retained for compatibility and should be treated as secrets regardless of their historical name.
+Legacy token prefixes are also retained internally for compatibility and must continue to be treated as secrets.
 
 ## Direct-control rules
 

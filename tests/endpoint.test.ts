@@ -3,7 +3,6 @@ import {
   connectorAction,
   connectorNameFor,
   connectorRepairDecision,
-  LEGACY_CONNECTOR_NAME,
   mcpUrlFromPublic,
   normalizePublicUrl,
   reclaimUserMessage,
@@ -23,6 +22,7 @@ describe("connectorAction", () => {
     expect(connectorAction("https://old.trycloudflare.com/mcp", "https://new.trycloudflare.com/mcp")).toBe("update");
     expect(reclaimUserMessage("Codex with ChatGPT")).toContain("删除");
     expect(reclaimUserMessage("Codex with ChatGPT")).not.toContain("Reconnect");
+    expect(reclaimUserMessage("Codex with ChatGPT")).not.toContain("Codex with ChatGPT");
   });
 
   it("does nothing without a next URL", () => {
@@ -77,7 +77,7 @@ describe("connectorNameFor", () => {
         previousName: "Codex with ChatGPT",
         hadEndpointBefore: true,
       })
-    ).toBe(LEGACY_CONNECTOR_NAME);
+    ).toBe("ChatX · EchoMind");
   });
 
   it("keeps the legacy title when this workspace was used before the name field existed", () => {
@@ -87,7 +87,7 @@ describe("connectorNameFor", () => {
         workspaceId: "abc123abc123",
         hadEndpointBefore: true,
       })
-    ).toBe(LEGACY_CONNECTOR_NAME);
+    ).toBe("ChatX · EchoMind");
   });
 
   it("gives a new workspace its own connector title", () => {

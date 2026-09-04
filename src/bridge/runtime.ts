@@ -47,7 +47,7 @@ export interface HealthPayload {
   status: string;
 }
 
-/** Probe a port and check whether a healthy c2c bridge for the workspace answers. */
+/** Probe a port and check whether a healthy ChatX bridge for the workspace answers. */
 export async function probeBridge(
   port: number,
   timeoutMs = 2000

@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { getStateDir, readJsonIfExists, writeSecureJson } from "../config/paths.js";
+import { connectorDisplayName } from "../config/endpoint.js";
 
 export type ConversationMode = "long-chat" | "project";
 
@@ -45,7 +46,13 @@ export function sessionFile(workspaceId: string): string {
 }
 
 export function readSession(workspaceId: string): SavedSession | null {
-  return readJsonIfExists<SavedSession>(sessionFile(workspaceId));
+  const saved = readJsonIfExists<SavedSession>(sessionFile(workspaceId));
+  if (!saved) return null;
+  return {
+    ...saved,
+    title: saved.title?.replace(/^C2C\b/, "ChatX"),
+    connectorName: connectorDisplayName(saved.connectorName) ?? undefined,
+  };
 }
 
 export function writeSession(workspaceId: string, session: SavedSession): SavedSession {

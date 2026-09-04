@@ -41,7 +41,7 @@ try {
   const record = packed[0];
   if (!record?.filename) throw new Error("npm pack did not return a tarball filename");
   const paths = new Set((record.files ?? []).map((item) => item.path));
-  for (const required of ["dist/cli/index.js", "bin/c2c.js", "README.md", "LICENSE"]) {
+  for (const required of ["dist/cli/index.js", "bin/chatx.js", "README.md", "LICENSE"]) {
     if (!paths.has(required)) throw new Error(`release tarball is missing ${required}`);
   }
   if ([...paths].some((item) => item.startsWith("tests/") || item.startsWith("src/"))) {
@@ -53,17 +53,15 @@ try {
   runNpm(["install", "--ignore-scripts", tarball], { cwd: installDir, timeout: 180000 });
 
   const installedRoot = path.join(installDir, "node_modules", pkg.name);
-  const cli = path.join(installedRoot, "bin", "c2c.js");
+  const cli = path.join(installedRoot, "bin", "chatx.js");
   if (!fs.existsSync(cli)) throw new Error("installed package CLI entry is missing");
   const version = run(process.execPath, [cli, "--version"], { cwd: installDir });
   if (version !== pkg.version) throw new Error(`installed CLI version mismatch: expected ${pkg.version}, got ${version}`);
 
   const binDir = path.join(installDir, "node_modules", ".bin");
   const suffix = process.platform === "win32" ? ".cmd" : "";
-  for (const alias of ["chatx", "c2c"]) {
-    if (!fs.existsSync(path.join(binDir, `${alias}${suffix}`))) {
-      throw new Error(`installed package is missing ${alias} CLI alias`);
-    }
+  if (!fs.existsSync(path.join(binDir, `chatx${suffix}`))) {
+    throw new Error("installed package is missing the ChatX CLI");
   }
 
   process.stdout.write(`release-smoke ok: ${pkg.name}@${pkg.version}, ${record.entryCount} packed files\n`);

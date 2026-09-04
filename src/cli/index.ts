@@ -4,9 +4,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startBridge } from "../bridge/server.js";
-import { findLiveBridge, probeBridge, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
+import { clearRuntimeState, findLiveBridge, probeBridge, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
 import { adminFetch, ensureBridge, stopBridge } from "../process/daemon.js";
 import { Workspace } from "../workspace/manager.js";
+import { migrateWorkspaceDirectory } from "../workspace/migration.js";
 import { AuthStore } from "../auth/store.js";
 import { appendExecutionRecord } from "../execution/records.js";
 import { detectTunnelBinaries } from "../tunnel/detect.js";
@@ -31,8 +32,13 @@ import { ensureSandboxAllowlist, getCodexConfigPath, isStateDirAllowlisted } fro
 import {
   CHATGPT_CREATE_CONNECTOR_URL,
   CHATGPT_PLUGINS_URL,
+  actionsRefreshDecision,
+  brandMigrationUserMessage,
   connectorNameFor,
+  connectorNeedsBrandMigration,
   connectorRepairDecision,
+  confirmConnectorEndpoint,
+  LEGACY_CONNECTOR_NAME,
   mcpUrlFromPublic,
   normalizePublicUrl,
   readLastEndpoint,
@@ -41,7 +47,7 @@ import {
   writeLastEndpoint,
   type LastEndpoint,
 } from "../config/endpoint.js";
-import { PRODUCT_NAME, VERSION } from "../version.js";
+import { PRODUCT_NAME, TOOLSET_VERSION, VERSION } from "../version.js";
 import {
   clearChatPointer,
   mergeSession,
@@ -83,7 +89,9 @@ function persistWorkspaceEndpoint(opts: {
     port: opts.port,
     publicUrl: opts.publicUrl,
     mcpUrl: opts.mcpUrl,
-    connectorName,
+    connectorMcpUrl: previous ? previous.connectorMcpUrl ?? previous.mcpUrl : opts.mcpUrl,
+    connectorName: previous ? previous.connectorName : connectorName,
+    actionsVersion: previous ? previous.actionsVersion : TOOLSET_VERSION,
   });
   return connectorName;
 }
@@ -434,6 +442,14 @@ program
           hadEndpointBefore: Boolean(lastEndpoint),
         })
       : PRODUCT_NAME;
+    const brandMigrationNeeded = workspace
+      ? connectorNeedsBrandMigration({
+          previousName: lastEndpoint?.connectorName,
+          hadEndpointBefore: Boolean(lastEndpoint),
+        })
+      : false;
+    let actionsRefresh = actionsRefreshDecision(lastEndpoint, connectorName);
+    const configuredMcpUrl = lastEndpoint?.connectorMcpUrl ?? lastEndpoint?.mcpUrl ?? null;
     const tunnelState = workspace ? readTunnelState(workspace.id) : null;
     const namedReady = tunnelState ? isNamedTunnelReady(tunnelState) : false;
     let namedRepair: { needed: boolean; userMessage?: string } = { needed: false };
@@ -442,6 +458,7 @@ program
       reason?: string;
       connectorAction: "none" | "create" | "update";
       connectorName: string;
+      existingConnectorName?: string;
       userMessage?: string;
       mcpUrl: string | null;
       previousMcpUrl: string | null;
@@ -456,7 +473,7 @@ program
       connectorAction: "none",
       connectorName,
       mcpUrl: lastEndpoint?.mcpUrl ?? null,
-      previousMcpUrl: lastEndpoint?.mcpUrl ?? null,
+      previousMcpUrl: configuredMcpUrl,
       pages: {
         plugins: CHATGPT_PLUGINS_URL,
         createConnector: CHATGPT_CREATE_CONNECTOR_URL,
@@ -521,7 +538,12 @@ program
       if (currentUrl && healthy) {
         report.tunnel = { ok: true, detail: currentUrl };
         const nextMcp = mcpUrlFromPublic(currentUrl);
-        const decision = connectorRepairDecision(lastEndpoint?.mcpUrl, nextMcp, hasAuthorization);
+        const decision = connectorRepairDecision(
+          configuredMcpUrl,
+          nextMcp,
+          hasAuthorization,
+          brandMigrationNeeded
+        );
         const action = decision.action;
         const boundName = nextMcp
           ? persistWorkspaceEndpoint({
@@ -539,16 +561,23 @@ program
           reason: decision.reason,
           connectorAction: action,
           connectorName: boundName,
+          existingConnectorName:
+            action === "update" && brandMigrationNeeded
+              ? lastEndpoint?.connectorName ?? LEGACY_CONNECTOR_NAME
+              : boundName,
           userMessage:
             action === "update"
               ? decision.reason === "authorization_lost"
                 ? reauthorizeUserMessage(boundName)
-                : reclaimUserMessage(boundName)
+                : decision.reason === "brand_migration"
+                  ? brandMigrationUserMessage(boundName)
+                  : reclaimUserMessage(boundName)
               : undefined,
           mcpUrl: nextMcp,
-          previousMcpUrl: lastEndpoint?.mcpUrl ?? null,
+          previousMcpUrl: configuredMcpUrl,
         };
         if (action === "update") {
+          actionsRefresh = { ...actionsRefresh, needed: false, userMessage: undefined };
           try {
             const pairing = await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
             chatgptRepair.pairingCode = pairing.code;
@@ -556,7 +585,9 @@ program
             results.push(
               decision.reason === "authorization_lost"
                 ? `已生成新的配对码，需要重新授权「${boundName}」`
-                : `已生成新的配对码，需要更新「${boundName}」`
+                : decision.reason === "brand_migration"
+                  ? `已生成新的配对码，需要完成「${boundName}」品牌迁移`
+                  : `已生成新的配对码，需要更新「${boundName}」`
             );
           } catch (error) {
             report.oauth = { ok: false, detail: (error as Error).message };
@@ -597,7 +628,7 @@ program
     }
 
     if (opts.json) {
-      say(JSON.stringify({ report, repairs: results, chatgptRepair, namedRepair }));
+      say(JSON.stringify({ report, repairs: results, chatgptRepair, actionsRefresh, namedRepair }));
       return;
     }
     say(`${PRODUCT_NAME} Doctor`);
@@ -630,7 +661,7 @@ program
       say(chatgptRepair.userMessage);
       if (chatgptRepair.mcpUrl) {
         say(
-          chatgptRepair.reason === "authorization_lost"
+          chatgptRepair.reason === "authorization_lost" || chatgptRepair.reason === "brand_migration"
             ? `连接地址：${chatgptRepair.mcpUrl}`
             : `新的连接地址：${chatgptRepair.mcpUrl}`
         );
@@ -638,16 +669,50 @@ program
       if (chatgptRepair.pairingCode) say(`配对码：${chatgptRepair.pairingCode}`);
       say("");
     }
+    if (actionsRefresh.needed && actionsRefresh.userMessage) {
+      say(actionsRefresh.userMessage);
+      say("");
+    }
     say(
-      allOk && !chatgptRepair.needed && !namedRepair.needed
+      allOk && !chatgptRepair.needed && !namedRepair.needed && !actionsRefresh.needed
         ? "Everything looks good."
         : chatgptRepair.needed
           ? "本地已就绪，还需要在 ChatGPT 删除并重新添加该连接。"
-          : namedRepair.needed
-            ? "固定域名还没连上，需要先登录 Cloudflare。"
-            : "仍有问题未解决，可尝试 `chatx restart --tunnel`。"
+          : actionsRefresh.needed
+            ? "本地已就绪，还需要在 ChatGPT 刷新该连接的 Actions。"
+            : namedRepair.needed
+              ? "固定域名还没连上，需要先登录 Cloudflare。"
+              : "仍有问题未解决，可尝试 `chatx restart --tunnel`。"
     );
     if (!allOk || namedRepair.needed) process.exitCode = 1;
+  });
+
+// ---------------------------------------------------------------- connector confirmation (internal)
+
+program
+  .command("connector-confirm", { hidden: true })
+  .description("Confirm that the ChatGPT connector is on the current ChatX brand/toolset")
+  .option("-w, --workspace <path>")
+  .option("--json", "machine-readable output", false)
+  .action((opts: { workspace?: string; json: boolean }) => {
+    const workspace = new Workspace(resolveWorkspace(opts.workspace));
+    const endpoint = confirmConnectorEndpoint(workspace.id, workspace.name);
+    if (!endpoint) throw new Error("No saved ChatGPT connector for this workspace.");
+    const saved = readSession(workspace.id);
+    if (saved) {
+      writeSession(workspace.id, {
+        ...saved,
+        connectorName: endpoint.connectorName,
+        savedAt: new Date().toISOString(),
+      });
+    }
+    const payload = {
+      ok: true,
+      connectorName: endpoint.connectorName,
+      actionsVersion: endpoint.actionsVersion,
+    };
+    if (opts.json) say(JSON.stringify(payload));
+    else check("ChatX 连接器状态已同步");
   });
 
 // ---------------------------------------------------------------- pair / unpair
@@ -710,6 +775,89 @@ program
       shown = true;
     }
     if (!shown) say("暂无日志。");
+  });
+
+program
+  .command("workspace-rename")
+  .description("Safely rename this workspace and migrate its ChatX connection state")
+  .option("-w, --workspace <path>")
+  .option("--to <name>", "new sibling directory name", "ChatX-Workspace")
+  .option("--json", "machine-readable output", false)
+  .action(async (opts: { workspace?: string; to: string; json: boolean }) => {
+    const source = new Workspace(resolveWorkspace(opts.workspace));
+    const previousEndpoint = readLastEndpoint(source.id);
+    const previousTunnel = readTunnelState(source.id);
+    const live = await findLiveBridge(source.id);
+
+    if (live) {
+      await stopBridge(source.root);
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && (await probeBridge(live.port))) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (await probeBridge(live.port)) {
+        throw new Error("Bridge is still running; workspace rename was not started.");
+      }
+    }
+    clearRuntimeState(source.id);
+
+    const relativeCwd = path.relative(source.root, process.cwd());
+    if (relativeCwd === "" || (!relativeCwd.startsWith("..") && !path.isAbsolute(relativeCwd))) {
+      process.chdir(path.dirname(source.root));
+    }
+
+    const migration = migrateWorkspaceDirectory(source.root, opts.to);
+    let connectionRestored = !live;
+    let restoreError: string | null = null;
+
+    if (live) {
+      try {
+        const { runtime } = await ensureBridge(migration.newRoot);
+        if (previousEndpoint?.publicUrl) {
+          if (isNamedTunnelReady(previousTunnel)) {
+            let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+            const deadline = Date.now() + 15_000;
+            while (!info.publicUrl && Date.now() < deadline) {
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+            }
+            if (!info.publicUrl) {
+              await adminFetch<TunnelStartResponse>(runtime, "POST", "/admin/tunnel/start", 90_000);
+              info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+            }
+            if (!info.publicUrl || normalizePublicUrl(info.publicUrl) !== normalizePublicUrl(previousEndpoint.publicUrl)) {
+              throw new Error("Fixed ChatX connection did not return on its original address.");
+            }
+          } else {
+            const started = await adminFetch<TunnelStartResponse>(runtime, "POST", "/admin/tunnel/start", 90_000);
+            if (started.url) {
+              const migratedEndpoint = readLastEndpoint(migration.newWorkspaceId);
+              persistWorkspaceEndpoint({
+                workspaceId: migration.newWorkspaceId,
+                workspaceName: new Workspace(migration.newRoot).name,
+                port: runtime.port,
+                publicUrl: started.url,
+                mcpUrl: mcpUrlFromPublic(started.url)!,
+                previous: migratedEndpoint,
+              });
+            }
+          }
+        }
+        connectionRestored = true;
+      } catch (error) {
+        restoreError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const payload = { ok: restoreError === null, ...migration, connectionRestored, restoreError };
+    if (opts.json) {
+      say(JSON.stringify(payload));
+    } else {
+      check(`Workspace 已迁移到 ${migration.newRoot}`);
+      if (live && connectionRestored) check("ChatX 连接已恢复");
+      if (restoreError) cross(`目录与状态已迁移，但连接恢复失败：${restoreError}`);
+    }
+    if (restoreError) process.exitCode = 1;
   });
 
 program
@@ -966,7 +1114,7 @@ tunnelCmd
   .requiredOption("--mode <mode>", "quick or named")
   .option("-w, --workspace <path>")
   .option("--zone <domain>", "Cloudflare domain for a named hostname")
-  .option("--hostname <hostname>", "override the default c2c-<project>.<zone>")
+  .option("--hostname <hostname>", "override the default chatx-<project>.<zone>")
   .option("--json", "machine-readable output", false)
   .action(async (opts: { mode: string; workspace?: string; zone?: string; hostname?: string; json: boolean }) => {
     const root = resolveWorkspace(opts.workspace);

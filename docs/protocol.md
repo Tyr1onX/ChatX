@@ -1,4 +1,4 @@
-# C2C Agent Protocol
+# ChatX Agent Protocol
 
 Control plane: Computer Use (tiny structured messages typed into the ChatGPT UI).
 Data plane: MCP (ChatGPT pulls files, diffs, search results itself).
@@ -25,15 +25,15 @@ INIT → PLAN → EXECUTING → EXECUTED → REVIEW → PLAN | DONE | BLOCKED | 
 
 ## Message format
 
-Every control message starts with `[C2C]` and key-value headers, then sections.
+Every control message starts with `[ChatX]` and key-value headers, then sections.
 Keep messages < 1 KB. No diffs, no logs, no file bodies.
 
 ### INIT (Codex → ChatGPT)
 
 ```
-[C2C]
+[ChatX]
 STATE: INIT
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 0
 
 GOAL:
@@ -47,9 +47,9 @@ Create an implementation plan for Codex.
 ### PLAN (ChatGPT → Codex)
 
 ```
-[C2C]
+[ChatX]
 STATE: PLAN
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 1
 
 GOAL:
@@ -78,9 +78,9 @@ Plans must be finite, concrete, executable. Not 40-step epics.
 ### EXECUTED (Codex → ChatGPT)
 
 ```
-[C2C]
+[ChatX]
 STATE: EXECUTED
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 1
 
 RESULT:
@@ -96,15 +96,15 @@ Please independently inspect the workspace and current git diff through MCP.
 ```
 
 Before sending EXECUTED, Codex records the iteration:
-`chatx record --task c2c_f81a --iteration 1 --changed-files ... --tests ... --exit-status ok`
+`chatx record --task chatx_f81a --iteration 1 --changed-files ... --tests ... --exit-status ok`
 so ChatGPT can read it via the `execution_summary` / `test_status` tools.
 
 ### DONE / BLOCKED (ChatGPT → Codex)
 
 ```
-[C2C]
+[ChatX]
 STATE: DONE
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 3
 
 SUMMARY:
@@ -112,9 +112,9 @@ SUMMARY:
 ```
 
 ```
-[C2C]
+[ChatX]
 STATE: BLOCKED
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 3
 
 REASON:
@@ -128,7 +128,7 @@ NEEDS:
 
 `chatx session --json` → `conversation.mode` chooses how chats are grouped.
 
-- **long-chat:** one long-lived C2C conversation per workspace. Codex opens a
+- **long-chat:** one long-lived ChatX conversation per workspace. Codex opens a
   replacement chat only when the user asks, the old chat lags, or the chat was
   lost.
 - **project:** one ChatGPT Project (collection) per workspace. A new Codex
@@ -144,9 +144,9 @@ Trust order: connector (current code) > HANDOFF (this task) > Project
 instructions > Project memory.
 
 ```
-[C2C]
+[ChatX]
 STATE: HANDOFF
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 4
 
 ORIGINAL_GOAL:
@@ -168,12 +168,12 @@ Independently review iteration 4 via git_diff and reply PLAN or DONE.
 
 ## Loop limits
 
-`maxIterations` (default 12, configurable in `.c2c.json`). When reached, Codex
+`maxIterations` (default 12, configurable in `.chatx.json`). When reached, Codex
 pauses and asks the user whether to continue.
 
 ## Boot Prompt
 
-Send once at the start of every new C2C conversation:
+Send once at the start of every new ChatX conversation:
 
 ```
 You are the planning and review layer of a Codex coding session.
@@ -195,7 +195,7 @@ Rules:
 7. Do not assume an implementation succeeded just because Codex says so.
 8. Continue until the implementation satisfies the success criteria.
 9. Avoid unnecessary rewrites.
-10. Return C2C structured control messages.
+10. Return ChatX structured control messages.
 11. Be substantive. PLAN and review replies must carry enough signal for
     Codex to act on: rationale, per-file natural-language suggestions
     (which file, what to change and why), risks worth checking, and test
@@ -241,5 +241,5 @@ This Project's memory is only for this workspace. On HANDOFF, trust the
 brief, re-read code through the connector, and resume at NEXT_EXPECTED_STEP.
 
 Be substantive: why, which file, what to test. No empty one-liners and
-no 40-step epics. Use C2C control messages.
+no 40-step epics. Use ChatX control messages.
 ```

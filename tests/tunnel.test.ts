@@ -57,12 +57,12 @@ describe("normalizeNamedTunnelHostname", () => {
 });
 
 describe("named hostname helpers", () => {
-  it("builds a stable c2c-<project>.<zone> hostname", () => {
-    expect(suggestedNamedHostname("Example.COM", "My App", "abcdef123456")).toBe("c2c-my-app.example.com");
+  it("builds a stable chatx-<project>.<zone> hostname", () => {
+    expect(suggestedNamedHostname("Example.COM", "My App", "abcdef123456")).toBe("chatx-my-app.example.com");
   });
 
   it("falls back to the workspace id when the name is not ASCII", () => {
-    expect(hostnameSlug("回声", "abcdef123456")).toBe("c2c-ws-abcdef12");
+    expect(hostnameSlug("回声", "abcdef123456")).toBe("chatx-ws-abcdef12");
   });
 
   it("parses a typed domain", () => {
@@ -130,8 +130,8 @@ describe("tunnel preference state", () => {
     }).then((result) => {
       expect(result.fallback).toBe(false);
       expect(result.state.preference).toBe("named");
-      expect(result.state.hostname).toBe("c2c-demo.example.com");
-      expect(result.state.tunnelName).toBe("c2c-abcdef123456");
+      expect(result.state.hostname).toBe("chatx-demo.example.com");
+      expect(result.state.tunnelName).toBe("chatx-abcdef123456");
       expect(isNamedTunnelReady(readTunnelState("abcdef123456"))).toBe(true);
     });
   });
