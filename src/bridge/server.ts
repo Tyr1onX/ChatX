@@ -15,7 +15,7 @@ import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
-import { writeRuntimeState, clearRuntimeState, type RuntimeState } from "./runtime.js";
+import { writeRuntimeState, clearRuntimeState, probeBridgeHealth, type RuntimeState } from "./runtime.js";
 import { BrowserController } from "../browser/controller.js";
 import { ProcessSessionManager } from "../process/session-manager.js";
 
@@ -114,25 +114,29 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
   const startTunnel = (): Promise<string> => {
     if (tunnelStartPromise) return tunnelStartPromise;
-    const status = tunnel.status();
-    if (status.running && status.url) {
-      publicBaseUrl = status.url;
-      persistRuntime();
-      return Promise.resolve(status.url);
-    }
-    tunnelStartPromise = tunnel
-      .start(port)
-      .then((url) => {
-        if (!closed) {
-          publicBaseUrl = url;
-          tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+    tunnelStartPromise = (async () => {
+      const status = tunnel.status();
+      if (status.running && status.url) {
+        const health = await probeBridgeHealth(status.url, workspace.id, 8000);
+        if (health) {
+          publicBaseUrl = status.url;
           persistRuntime();
+          return status.url;
         }
-        return url;
-      })
-      .finally(() => {
-        tunnelStartPromise = null;
-      });
+        await tunnel.stop();
+        publicBaseUrl = null;
+        persistRuntime();
+      }
+      const url = await tunnel.start(port);
+      if (!closed) {
+        publicBaseUrl = url;
+        tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+        persistRuntime();
+      }
+      return url;
+    })().finally(() => {
+      tunnelStartPromise = null;
+    });
     return tunnelStartPromise;
   };
 
