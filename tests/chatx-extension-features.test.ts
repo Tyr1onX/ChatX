@@ -23,11 +23,11 @@ describe("ChatX unified browser extension", () => {
     expect(html).toContain('id="sessionGuardToggle"');
     expect(html).toContain('id="agentBridgeToggle"');
     expect(html).toContain('id="agentBridgeControls" hidden');
-    expect(html).toContain("Developer: <strong");
-    expect(html).toContain("Auditor: <strong");
-    expect(html).toContain("Task");
-    expect(html).toContain("Max rounds");
-    expect(html).toContain("Max generations");
+    expect(html).toContain('data-i18n="developer"');
+    expect(html).toContain('data-i18n="auditor"');
+    expect(html).toContain('data-i18n="task">任务');
+    expect(html).toContain('data-i18n="maxRounds">最大轮数');
+    expect(html).toContain('data-i18n="maxGenerations">最大代数');
     expect(popup).toContain('setFeature("watcher"');
     expect(popup).toContain('setFeature("sessionGuard"');
     expect(popup).toContain('setFeature("agentBridge"');
@@ -41,6 +41,7 @@ describe("ChatX unified browser extension", () => {
   it("adds one ChatGPT-only floating launcher backed by the same UI API", () => {
     const html = read("popup.html");
     const popup = read("popup.js");
+    const uiPrefs = read("src/ui-prefs.js");
     const uiApi = read("src/ui-api.js");
     const floating = read("src/floating-ui.js");
     const background = read("src/background.js");
@@ -53,6 +54,7 @@ describe("ChatX unified browser extension", () => {
     };
 
     expect(html).toContain('src="icons/icon32.png"');
+    expect(html).toContain('src="src/ui-prefs.js"');
     expect(html).toContain('src="src/ui-api.js"');
     expect(popup).toContain("const Ui = globalThis.ChatXUiApi");
     expect(popup).not.toContain("chrome.runtime.sendMessage");
@@ -66,7 +68,7 @@ describe("ChatX unified browser extension", () => {
     expect(floating).toContain('Ui.assign("auditor")');
     expect(floating).toContain("Ui.start({");
     expect(floating).toContain("Ui.stop()");
-    for (const label of ["Watcher", "Session Guard", "Agent Bridge", "Developer:", "Auditor:", "Task", "Max rounds", "Max generations", "status", "generation", "round"]) {
+    for (const label of ["任务监听", "会话保护", "Agent Bridge / 智能协作", "开发者", "审计者", "任务", "最大轮数", "最大代数", "状态", "第几代", "第几轮"]) {
       expect(floating).toContain(label);
     }
     for (const forbidden of ["timeline", "requestId", "completion marker", "storage 原始状态"]) {
@@ -86,6 +88,7 @@ describe("ChatX unified browser extension", () => {
     expect(bridgeBackground).toContain("message.triggerTabId ?? contentTabId");
 
     expect(manifest.content_scripts[2].matches).toEqual(["https://chatgpt.com/*"]);
+    expect(manifest.content_scripts[2].js).toContain("src/ui-prefs.js");
     expect(manifest.content_scripts[2].js).toContain("src/ui-api.js");
     expect(manifest.content_scripts[2].js).toContain("src/floating-ui.js");
     expect(manifest.web_accessible_resources).toEqual([{
@@ -225,6 +228,7 @@ describe("ChatX unified browser extension", () => {
     const files = [
       "src/background.js",
       "src/features.js",
+      "src/ui-prefs.js",
       "src/ui-api.js",
       "src/floating-ui.js",
       "src/watcher/background.js",

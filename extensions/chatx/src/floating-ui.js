@@ -3,14 +3,25 @@
   if (document.getElementById(HOST_ID)) return;
 
   const Features = globalThis.ChatXFeatures;
+  const Prefs = globalThis.ChatXUiPrefs;
   const Ui = globalThis.ChatXUiApi;
+  const BUBBLE_SIZE = 44;
+  const DEFAULT_OFFSET = 20;
+  const PANEL_GAP = 10;
+  const VIEWPORT_MARGIN = 8;
+  const DRAG_THRESHOLD = 4;
+
   let features = { ...Features.DEFAULTS };
+  let uiPrefs = { ...Prefs.DEFAULTS };
   let currentState = null;
   let bridgeInitialized = false;
+  let bubblePosition = null;
+  let dragState = null;
+  let noticeError = null;
 
   const host = document.createElement("div");
   host.id = HOST_ID;
-  host.style.cssText = "all:initial;position:fixed;right:20px;bottom:20px;z-index:2147483646;display:block;pointer-events:auto;";
+  host.style.cssText = `all:initial;position:fixed;right:${DEFAULT_OFFSET}px;bottom:${DEFAULT_OFFSET}px;width:${BUBBLE_SIZE}px;height:${BUBBLE_SIZE}px;z-index:2147483646;display:block;pointer-events:auto;`;
   const shadow = host.attachShadow({ mode: "open" });
 
   const style = document.createElement("style");
@@ -30,18 +41,18 @@
       background: Canvas;
       color: CanvasText;
       box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
-      cursor: pointer;
+      cursor: grab;
       display: grid;
       place-items: center;
+      touch-action: none;
+      user-select: none;
     }
     .launcher:hover { background: color-mix(in srgb, CanvasText 5%, Canvas); }
-    .launcher img { width: 30px; height: 30px; display: block; }
+    .launcher.dragging { cursor: grabbing; }
+    .launcher img { width: 30px; height: 30px; display: block; pointer-events: none; }
     .panel {
       position: absolute;
-      right: 0;
-      bottom: 54px;
       width: min(316px, calc(100vw - 32px));
-      max-height: min(620px, calc(100vh - 90px));
       overflow: auto;
       padding: 12px;
       border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
@@ -59,6 +70,22 @@
       margin-bottom: 5px;
     }
     .brand { font-size: 15px; font-weight: 700; }
+    .header-actions, .language-switch {
+      display: flex;
+      align-items: center;
+    }
+    .header-actions { gap: 6px; }
+    .language-switch { gap: 3px; font-size: 11px; }
+    .language-switch button {
+      min-height: 0;
+      padding: 2px 3px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.55;
+    }
+    .language-switch button[aria-pressed="true"] { opacity: 1; font-weight: 700; }
     .close {
       width: 28px;
       height: 28px;
@@ -132,33 +159,40 @@
   panel.innerHTML = `
     <div class="header">
       <strong class="brand">ChatX</strong>
-      <button class="close" type="button" aria-label="Close ChatX">×</button>
+      <div class="header-actions">
+        <div class="language-switch" aria-label="Language">
+          <button type="button" data-language="zh-CN" aria-pressed="true">中文</button>
+          <span>/</span>
+          <button type="button" data-language="en" aria-pressed="false">EN</button>
+        </div>
+        <button class="close" type="button" aria-label="关闭 ChatX">×</button>
+      </div>
     </div>
-    <label class="feature-row"><span>Watcher</span><input id="watcherToggle" type="checkbox"></label>
-    <label class="feature-row"><span>Session Guard</span><input id="sessionGuardToggle" type="checkbox"></label>
-    <label class="feature-row"><span>Agent Bridge</span><input id="agentBridgeToggle" type="checkbox"></label>
+    <label class="feature-row"><span data-i18n="watcher">任务监听</span><input id="watcherToggle" type="checkbox"></label>
+    <label class="feature-row"><span data-i18n="sessionGuard">会话保护</span><input id="sessionGuardToggle" type="checkbox"></label>
+    <label class="feature-row"><span data-i18n="agentBridge">Agent Bridge / 智能协作</span><input id="agentBridgeToggle" type="checkbox"></label>
     <section id="agentBridgeControls" class="bridge" hidden>
       <div class="agents">
-        <div>Developer: <strong id="developerState">missing</strong></div>
-        <div>Auditor: <strong id="auditorState">missing</strong></div>
+        <div><span data-i18n="developer">开发者</span>: <strong id="developerState">未指定</strong></div>
+        <div><span data-i18n="auditor">审计者</span>: <strong id="auditorState">未指定</strong></div>
       </div>
-      <label class="field-label" for="task">Task</label>
+      <label class="field-label" for="task" data-i18n="task">任务</label>
       <textarea id="task" rows="3" required></textarea>
       <div class="budget-grid">
-        <label for="maxRounds">Max rounds<input id="maxRounds" type="number" min="1" step="1" value="6"></label>
-        <label for="maxGenerations">Max generations<input id="maxGenerations" type="number" min="1" step="1" value="3"></label>
+        <label for="maxRounds"><span data-i18n="maxRounds">最大轮数</span><input id="maxRounds" type="number" min="1" step="1" value="6"></label>
+        <label for="maxGenerations"><span data-i18n="maxGenerations">最大代数</span><input id="maxGenerations" type="number" min="1" step="1" value="3"></label>
       </div>
       <div class="button-grid">
-        <button id="assignDeveloper" type="button">Assign Developer</button>
-        <button id="assignAuditor" type="button">Assign Auditor</button>
-        <button id="start" type="button">Start</button>
-        <button id="stop" type="button">Stop</button>
+        <button id="assignDeveloper" type="button" data-i18n="assignDeveloper">指定开发者</button>
+        <button id="assignAuditor" type="button" data-i18n="assignAuditor">指定审计者</button>
+        <button id="start" type="button" data-i18n="start">开始</button>
+        <button id="stop" type="button" data-i18n="stop">停止</button>
       </div>
       <div class="runtime" aria-live="polite">
-        <div>status <strong id="status">IDLE</strong></div>
-        <div>generation <strong id="generation">1</strong></div>
-        <div>round <strong id="round">0</strong></div>
-        <div id="errorRow" hidden>error <strong id="error"></strong></div>
+        <div><span data-i18n="status">状态</span> <strong id="status">空闲</strong></div>
+        <div><span data-i18n="generation">第几代</span> <strong id="generation">1</strong></div>
+        <div><span data-i18n="round">第几轮</span> <strong id="round">0</strong></div>
+        <div id="errorRow" hidden><span data-i18n="error">错误</span> <strong id="error"></strong></div>
       </div>
       <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
     </section>
@@ -167,7 +201,7 @@
   const launcher = document.createElement("button");
   launcher.className = "launcher";
   launcher.type = "button";
-  launcher.setAttribute("aria-label", "Open ChatX");
+  launcher.setAttribute("aria-label", "打开 ChatX");
   launcher.setAttribute("aria-expanded", "false");
   const icon = document.createElement("img");
   icon.src = chrome.runtime.getURL("icons/icon32.png");
@@ -180,10 +214,92 @@
 
   const $ = (id) => shadow.getElementById(id);
 
-  function showNotice(text) {
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), Math.max(min, max));
+  }
+
+  function defaultBubblePosition() {
+    return Prefs.clampBubblePosition({
+      x: window.innerWidth - BUBBLE_SIZE - DEFAULT_OFFSET,
+      y: window.innerHeight - BUBBLE_SIZE - DEFAULT_OFFSET,
+    }, window.innerWidth, window.innerHeight, BUBBLE_SIZE);
+  }
+
+  function applyBubblePosition(position) {
+    bubblePosition = Prefs.clampBubblePosition(position, window.innerWidth, window.innerHeight, BUBBLE_SIZE);
+    host.style.left = `${bubblePosition.x}px`;
+    host.style.top = `${bubblePosition.y}px`;
+    host.style.right = "auto";
+    host.style.bottom = "auto";
+  }
+
+  function positionPanel() {
+    if (panel.hidden || !bubblePosition) return;
+
+    const panelWidth = Math.min(316, Math.max(0, window.innerWidth - 32));
+    const opensRight = window.innerWidth - (bubblePosition.x + BUBBLE_SIZE) >= bubblePosition.x;
+    const preferredLeft = opensRight
+      ? bubblePosition.x
+      : bubblePosition.x + BUBBLE_SIZE - panelWidth;
+    const panelLeft = clamp(
+      preferredLeft,
+      VIEWPORT_MARGIN,
+      window.innerWidth - panelWidth - VIEWPORT_MARGIN
+    );
+    panel.style.left = `${panelLeft - bubblePosition.x}px`;
+    panel.style.right = "auto";
+
+    const above = Math.max(0, bubblePosition.y - PANEL_GAP - VIEWPORT_MARGIN);
+    const below = Math.max(
+      0,
+      window.innerHeight - (bubblePosition.y + BUBBLE_SIZE + PANEL_GAP) - VIEWPORT_MARGIN
+    );
+    if (below >= above) {
+      panel.style.top = `${BUBBLE_SIZE + PANEL_GAP}px`;
+      panel.style.bottom = "auto";
+      panel.style.maxHeight = `${below}px`;
+    } else {
+      panel.style.top = "auto";
+      panel.style.bottom = `${BUBBLE_SIZE + PANEL_GAP}px`;
+      panel.style.maxHeight = `${above}px`;
+    }
+  }
+
+  function setPanelOpen(open) {
+    panel.hidden = !open;
+    launcher.setAttribute("aria-expanded", String(open));
+    if (open) {
+      positionPanel();
+      void refreshBridge();
+    }
+  }
+
+  function clearNotice() {
+    noticeError = null;
     const notice = $("notice");
-    notice.textContent = text || "";
-    notice.hidden = !text;
+    notice.textContent = "";
+    notice.hidden = true;
+  }
+
+  function showError(error) {
+    noticeError = error;
+    const notice = $("notice");
+    notice.textContent = Ui.friendlyError(error, uiPrefs.language);
+    notice.hidden = false;
+  }
+
+  function renderLanguage() {
+    shadow.querySelectorAll("[data-i18n]").forEach((element) => {
+      element.textContent = Prefs.t(uiPrefs.language, element.dataset.i18n);
+    });
+    shadow.querySelectorAll("[data-language]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.language === uiPrefs.language));
+    });
+    launcher.setAttribute("aria-label", Prefs.t(uiPrefs.language, "openChatX"));
+    shadow.querySelector(".close").setAttribute("aria-label", Prefs.t(uiPrefs.language, "closeChatX"));
+    if (currentState) renderBridge(currentState);
+    if (noticeError) showError(noticeError);
+    positionPanel();
   }
 
   function updateStartEnabled() {
@@ -198,9 +314,9 @@
 
   function renderBridge(state, hydrateInputs = false) {
     currentState = state;
-    $("developerState").textContent = state.developerAssigned ? "assigned" : "missing";
-    $("auditorState").textContent = state.auditorAssigned ? "assigned" : "missing";
-    $("status").textContent = state.status;
+    $("developerState").textContent = Prefs.t(uiPrefs.language, state.developerAssigned ? "assigned" : "missing");
+    $("auditorState").textContent = Prefs.t(uiPrefs.language, state.auditorAssigned ? "assigned" : "missing");
+    $("status").textContent = Prefs.statusLabel(uiPrefs.language, state.status);
     $("generation").textContent = String(state.generation);
     $("round").textContent = String(state.round);
     const failed = state.status === "FAILED" && state.error;
@@ -223,7 +339,8 @@
     $("sessionGuardToggle").checked = features.sessionGuard;
     $("agentBridgeToggle").checked = features.agentBridge;
     $("agentBridgeControls").hidden = !features.agentBridge;
-    if (!features.agentBridge) showNotice("");
+    if (!features.agentBridge) clearNotice();
+    positionPanel();
   }
 
   async function refreshBridge({ hydrate = false } = {}) {
@@ -232,7 +349,7 @@
       renderBridge(await Ui.getBridgeState(), hydrate || !bridgeInitialized);
       bridgeInitialized = true;
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   }
 
@@ -252,20 +369,76 @@
       }
     } catch (error) {
       input.checked = !enabled;
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     } finally {
       input.disabled = false;
     }
   }
 
-  launcher.addEventListener("click", () => {
-    panel.hidden = !panel.hidden;
-    launcher.setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) void refreshBridge();
+  function finishDrag(event) {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    if (dragState.moved && event.type === "pointerup") {
+      applyBubblePosition({
+        x: dragState.startPosition.x + event.clientX - dragState.startX,
+        y: dragState.startPosition.y + event.clientY - dragState.startY,
+      });
+      void Prefs.setBubblePosition(bubblePosition);
+    }
+    launcher.classList.remove("dragging");
+    if (launcher.hasPointerCapture?.(event.pointerId)) launcher.releasePointerCapture(event.pointerId);
+    dragState = null;
+  }
+
+  launcher.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startPosition = bubblePosition || defaultBubblePosition();
+    dragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPosition,
+      moved: false,
+    };
+    launcher.setPointerCapture?.(event.pointerId);
   });
-  shadow.querySelector(".close").addEventListener("click", () => {
-    panel.hidden = true;
-    launcher.setAttribute("aria-expanded", "false");
+
+  launcher.addEventListener("pointermove", (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const dx = event.clientX - dragState.startX;
+    const dy = event.clientY - dragState.startY;
+    if (!dragState.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!dragState.moved) {
+      dragState.moved = true;
+      launcher.classList.add("dragging");
+      setPanelOpen(false);
+    }
+    event.preventDefault();
+    applyBubblePosition({
+      x: dragState.startPosition.x + dx,
+      y: dragState.startPosition.y + dy,
+    });
+  });
+
+  launcher.addEventListener("pointerup", (event) => {
+    const moved = dragState?.moved === true;
+    finishDrag(event);
+    if (!moved) setPanelOpen(panel.hidden);
+  });
+  launcher.addEventListener("pointercancel", finishDrag);
+  launcher.addEventListener("click", (event) => {
+    if (event.detail > 0) {
+      event.preventDefault();
+      return;
+    }
+    setPanelOpen(panel.hidden);
+  });
+
+  shadow.querySelector(".close").addEventListener("click", () => setPanelOpen(false));
+  shadow.querySelectorAll("[data-language]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      uiPrefs = await Prefs.setLanguage(button.dataset.language);
+      renderLanguage();
+    });
   });
 
   $("watcherToggle").addEventListener("change", (event) => {
@@ -279,49 +452,60 @@
   });
   $("assignDeveloper").addEventListener("click", async () => {
     try {
-      showNotice("");
+      clearNotice();
       renderBridge(await Ui.assign("developer"));
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   });
   $("assignAuditor").addEventListener("click", async () => {
     try {
-      showNotice("");
+      clearNotice();
       renderBridge(await Ui.assign("auditor"));
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   });
   $("start").addEventListener("click", async () => {
     try {
-      showNotice("");
+      clearNotice();
       renderBridge(await Ui.start({
         task: $("task").value.trim(),
         maxRounds: Number.parseInt($("maxRounds").value, 10),
         maxGenerations: Number.parseInt($("maxGenerations").value, 10),
       }));
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   });
   $("stop").addEventListener("click", async () => {
     try {
-      showNotice("");
+      clearNotice();
       renderBridge(await Ui.stop());
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   });
   $("task").addEventListener("input", updateStartEnabled);
   $("maxRounds").addEventListener("input", updateStartEnabled);
   $("maxGenerations").addEventListener("input", updateStartEnabled);
 
+  window.addEventListener("resize", () => {
+    if (uiPrefs.bubblePosition) applyBubblePosition(bubblePosition || uiPrefs.bubblePosition);
+    else applyBubblePosition(defaultBubblePosition());
+    positionPanel();
+  });
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
     if (changes[Features.KEY]) {
       features = Features.normalize(changes[Features.KEY].newValue);
       renderFeatures();
+    }
+    if (changes[Prefs.KEY]) {
+      uiPrefs = Prefs.normalize(changes[Prefs.KEY].newValue);
+      if (!dragState) applyBubblePosition(uiPrefs.bubblePosition || defaultBubblePosition());
+      renderLanguage();
     }
     if (features.agentBridge && (changes.runtimeProof || changes[Features.KEY])) {
       void refreshBridge();
@@ -330,10 +514,13 @@
 
   void (async () => {
     try {
+      uiPrefs = await Prefs.get();
+      applyBubblePosition(uiPrefs.bubblePosition || defaultBubblePosition());
+      renderLanguage();
       await refreshFeatures();
       await refreshBridge({ hydrate: true });
     } catch (error) {
-      showNotice(Ui.friendlyError(error));
+      showError(error);
     }
   })();
 })();

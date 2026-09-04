@@ -1,10 +1,13 @@
 const $ = (id) => document.getElementById(id);
 const Features = globalThis.ChatXFeatures;
+const Prefs = globalThis.ChatXUiPrefs;
 const Ui = globalThis.ChatXUiApi;
 
 let features = { ...Features.DEFAULTS };
+let uiPrefs = { ...Prefs.DEFAULTS };
 let currentState = null;
 let bridgeInitialized = false;
+let noticeError = null;
 
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -12,10 +15,30 @@ async function activeTab() {
   return tab;
 }
 
-function showNotice(text) {
+function clearNotice() {
+  noticeError = null;
   const notice = $("notice");
-  notice.textContent = text || "";
-  notice.hidden = !text;
+  notice.textContent = "";
+  notice.hidden = true;
+}
+
+function showError(error) {
+  noticeError = error;
+  const notice = $("notice");
+  notice.textContent = Ui.friendlyError(error, uiPrefs.language);
+  notice.hidden = false;
+}
+
+function renderLanguage() {
+  document.documentElement.lang = uiPrefs.language;
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    element.textContent = Prefs.t(uiPrefs.language, element.dataset.i18n);
+  });
+  document.querySelectorAll("[data-language]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.language === uiPrefs.language));
+  });
+  if (currentState) renderBridge(currentState);
+  if (noticeError) showError(noticeError);
 }
 
 function updateStartEnabled() {
@@ -30,9 +53,9 @@ function updateStartEnabled() {
 
 function renderBridge(state, hydrateInputs = false) {
   currentState = state;
-  $("developerState").textContent = state.developerAssigned ? "assigned" : "missing";
-  $("auditorState").textContent = state.auditorAssigned ? "assigned" : "missing";
-  $("status").textContent = state.status;
+  $("developerState").textContent = Prefs.t(uiPrefs.language, state.developerAssigned ? "assigned" : "missing");
+  $("auditorState").textContent = Prefs.t(uiPrefs.language, state.auditorAssigned ? "assigned" : "missing");
+  $("status").textContent = Prefs.statusLabel(uiPrefs.language, state.status);
   $("generation").textContent = String(state.generation);
   $("round").textContent = String(state.round);
 
@@ -58,7 +81,7 @@ function renderFeatures() {
   $("sessionGuardToggle").checked = features.sessionGuard;
   $("agentBridgeToggle").checked = features.agentBridge;
   $("agentBridgeControls").hidden = !features.agentBridge;
-  if (!features.agentBridge) showNotice("");
+  if (!features.agentBridge) clearNotice();
 }
 
 async function refreshBridge({ hydrate = false } = {}) {
@@ -68,7 +91,7 @@ async function refreshBridge({ hydrate = false } = {}) {
     renderBridge(state, hydrate || !bridgeInitialized);
     bridgeInitialized = true;
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 }
 
@@ -88,7 +111,7 @@ async function setFeature(name, enabled, input) {
     }
   } catch (error) {
     input.checked = !enabled;
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   } finally {
     input.disabled = false;
   }
@@ -106,29 +129,36 @@ $("agentBridgeToggle").addEventListener("change", (event) => {
   void setFeature("agentBridge", event.currentTarget.checked, event.currentTarget);
 });
 
+document.querySelectorAll("[data-language]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    uiPrefs = await Prefs.setLanguage(button.dataset.language);
+    renderLanguage();
+  });
+});
+
 $("assignDeveloper").addEventListener("click", async () => {
   try {
-    showNotice("");
+    clearNotice();
     const tab = await activeTab();
     renderBridge(await Ui.assign("developer", tab.id));
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 });
 
 $("assignAuditor").addEventListener("click", async () => {
   try {
-    showNotice("");
+    clearNotice();
     const tab = await activeTab();
     renderBridge(await Ui.assign("auditor", tab.id));
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 });
 
 $("start").addEventListener("click", async () => {
   try {
-    showNotice("");
+    clearNotice();
     const tab = await activeTab();
     renderBridge(await Ui.start({
       task: $("task").value.trim(),
@@ -137,16 +167,16 @@ $("start").addEventListener("click", async () => {
       triggerTabId: tab.id,
     }));
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 });
 
 $("stop").addEventListener("click", async () => {
   try {
-    showNotice("");
+    clearNotice();
     renderBridge(await Ui.stop());
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 });
 
@@ -160,6 +190,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     features = Features.normalize(changes[Features.KEY].newValue);
     renderFeatures();
   }
+  if (changes[Prefs.KEY]) {
+    uiPrefs = Prefs.normalize(changes[Prefs.KEY].newValue);
+    renderLanguage();
+  }
   if (features.agentBridge && (changes.runtimeProof || changes[Features.KEY])) {
     void refreshBridge();
   }
@@ -167,9 +201,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 void (async () => {
   try {
+    uiPrefs = await Prefs.get();
+    renderLanguage();
     await refreshFeatures();
     await refreshBridge({ hydrate: true });
   } catch (error) {
-    showNotice(Ui.friendlyError(error));
+    showError(error);
   }
 })();

@@ -28,6 +28,27 @@ h1 {
   font-size: 18px;
 }
 
+.language-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.language-switch button {
+  min-height: 0;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  opacity: 0.55;
+}
+
+.language-switch button[aria-pressed="true"] {
+  opacity: 1;
+  font-weight: 700;
+}
+
 .feature-row {
   display: flex;
   align-items: center;
