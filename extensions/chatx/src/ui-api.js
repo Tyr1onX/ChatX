@@ -24,6 +24,12 @@
     return (await message("BRIDGE_UI_STATE")).state;
   }
 
+  async function getWatcherStatus() {
+    const response = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
+    if (!response || response.error) throw new Error(response?.error || "WATCHER_STATUS_UNAVAILABLE");
+    return response;
+  }
+
   async function bindConversation(role, conversation) {
     return (await message("BRIDGE_BIND_CONVERSATION", { role, conversation })).state;
   }
@@ -52,6 +58,7 @@
     getFeatures,
     setFeature,
     getBridgeState,
+    getWatcherStatus,
     bindConversation,
     assign,
     start,

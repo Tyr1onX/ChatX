@@ -186,6 +186,15 @@
     return `X${statusVisual(status).tail}`;
   }
 
+  function resolveLauncherVisual({ agentBridgeEnabled, bridgeState, watcherRunning } = {}) {
+    if (agentBridgeEnabled && bridgeState?.running === true) {
+      return statusVisual(bridgeState.status);
+    }
+    if (Number(watcherRunning) > 0) return STATUS_VISUALS.DEVELOPING;
+    if (agentBridgeEnabled && bridgeState?.status) return statusVisual(bridgeState.status);
+    return STATUS_VISUALS.IDLE;
+  }
+
   function runtimeMeta(language, generation, round) {
     return language === "en"
       ? `G${generation} / R${round}`
@@ -211,6 +220,7 @@
     statusLabel,
     statusVisual,
     statusCharacter,
+    resolveLauncherVisual,
     runtimeMeta,
     errorLabel,
   });

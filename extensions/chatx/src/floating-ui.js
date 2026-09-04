@@ -15,6 +15,7 @@
   let features = { ...Features.DEFAULTS };
   let uiPrefs = { ...Prefs.DEFAULTS };
   let currentState = null;
+  let watcherStatus = null;
   let bridgeInitialized = false;
   let bubblePosition = null;
   let dragState = null;
@@ -422,8 +423,11 @@
   }
 
   function renderLauncherVisual() {
-    const status = features.agentBridge && currentState ? currentState.status : "IDLE";
-    const visual = Prefs.statusVisual(status);
+    const visual = Prefs.resolveLauncherVisual({
+      agentBridgeEnabled: features.agentBridge,
+      bridgeState: currentState,
+      watcherRunning: features.watcher ? watcherStatus?.running ?? 0 : 0,
+    });
     launcher.dataset.visual = visual.kind;
     launcherTail.textContent = visual.tail;
   }
@@ -492,7 +496,6 @@
   }
 
   async function refreshBridge({ hydrate = false } = {}) {
-    if (!features.agentBridge) return;
     try {
       renderBridge(await Ui.getBridgeState(), hydrate || !bridgeInitialized);
       bridgeInitialized = true;
@@ -504,6 +507,15 @@
   async function refreshFeatures() {
     features = await Ui.getFeatures();
     renderFeatures();
+  }
+
+  async function refreshWatcherStatus() {
+    try {
+      watcherStatus = await Ui.getWatcherStatus();
+      renderLauncherVisual();
+    } catch {
+      // Keep the last known visual until the next event-driven state change.
+    }
   }
 
   async function setFeature(name, enabled, input) {
@@ -711,7 +723,10 @@
       if (!dragState) applyBubblePosition(uiPrefs.bubblePosition || defaultBubblePosition());
       renderLanguage();
     }
-    if (features.agentBridge && (changes.runtimeProof || changes[Features.KEY])) {
+    if (changes.watcherState || changes[Features.KEY]) {
+      void refreshWatcherStatus();
+    }
+    if (changes.runtimeProof || changes[Features.KEY]) {
       void refreshBridge();
     }
   });
@@ -722,6 +737,7 @@
       applyBubblePosition(uiPrefs.bubblePosition || defaultBubblePosition());
       renderLanguage();
       await refreshFeatures();
+      await refreshWatcherStatus();
       await refreshBridge({ hydrate: true });
     } catch (error) {
       showError(error);

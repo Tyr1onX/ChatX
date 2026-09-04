@@ -48,6 +48,11 @@ function loadUiPrefs(initial?: unknown) {
       statusLabel(language: string, status: string): string;
       statusVisual(status: string): { tail: string; kind: string; cursor: boolean };
       statusCharacter(status: string): string;
+      resolveLauncherVisual(input?: {
+        agentBridgeEnabled?: boolean;
+        bridgeState?: { status: string; running: boolean } | null;
+        watcherRunning?: number;
+      }): { tail: string; kind: string; cursor: boolean };
       runtimeMeta(language: string, generation: number, round: number): string;
     },
     values,
@@ -108,6 +113,42 @@ describe("ChatX UI preferences", () => {
     expect(prefs.runtimeMeta("en", 2, 3)).toBe("G2 / R3");
   });
 
+  it("resolves launcher state from active Bridge work before Watcher work without letting Bridge terminal state mask Watcher", () => {
+    const { prefs } = loadUiPrefs();
+    const visual = (input: Parameters<typeof prefs.resolveLauncherVisual>[0]) => prefs.resolveLauncherVisual(input);
+
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "AUDITING", running: true },
+      watcherRunning: 3,
+    })).toMatchObject({ tail: "...", kind: "working" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "IDLE", running: false },
+      watcherRunning: 1,
+    })).toMatchObject({ tail: "...", kind: "working" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "COMPLETED", running: false },
+      watcherRunning: 1,
+    })).toMatchObject({ tail: "...", kind: "working" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "IDLE", running: false },
+      watcherRunning: 0,
+    })).toMatchObject({ tail: "_", kind: "idle" });
+    expect(visual({
+      agentBridgeEnabled: false,
+      bridgeState: { status: "COMPLETED", running: false },
+      watcherRunning: 1,
+    })).toMatchObject({ tail: "...", kind: "working" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "COMPLETED", running: false },
+      watcherRunning: 0,
+    })).toMatchObject({ tail: "!", kind: "completed" });
+  });
+
   it("keeps terminal status mapping presentation-only", () => {
     const { prefs, writes } = loadUiPrefs();
     const rawStatuses = ["IDLE", "DEVELOPING", "AUDITING", "COMPLETED", "FAILED", "STOPPED_USER"];
@@ -135,6 +176,8 @@ describe("ChatX UI preferences", () => {
     expect(popup).toContain("changes[Prefs.KEY]");
     expect(floating).toContain("Prefs.setLanguage(button.dataset.language)");
     expect(floating).toContain("changes[Prefs.KEY]");
+    expect(floating).toContain("Ui.getWatcherStatus()");
+    expect(floating).toContain("changes.watcherState");
     expect(manifest.content_scripts[2].js.indexOf("src/ui-prefs.js")).toBeLessThan(
       manifest.content_scripts[2].js.indexOf("src/ui-api.js")
     );
