@@ -63,15 +63,24 @@ function resolveWorkspace(option?: string): string {
   return path.resolve(option ?? process.cwd());
 }
 
-function persistWorkspaceEndpoint(opts: {
+async function persistWorkspaceEndpoint(opts: {
+  runtime: RuntimeState;
+  tokenCount: number;
   workspaceId: string;
   workspaceName: string;
   port: number;
   publicUrl: string | null;
   mcpUrl: string;
   previous?: LastEndpoint | null;
-}): string {
+}): Promise<string> {
   const previous = opts.previous ?? readLastEndpoint(opts.workspaceId);
+  if (
+    previous?.mcpUrl &&
+    opts.tokenCount > 0 &&
+    normalizePublicUrl(previous.mcpUrl) !== normalizePublicUrl(opts.mcpUrl)
+  ) {
+    await adminFetch(opts.runtime, "POST", "/admin/revoke-all");
+  }
   const connectorName = connectorNameFor({
     workspaceName: opts.workspaceName,
     workspaceId: opts.workspaceId,
@@ -204,7 +213,9 @@ program
     try {
       const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
-        ? persistWorkspaceEndpoint({
+        ? await persistWorkspaceEndpoint({
+            runtime,
+            tokenCount: info.tokenCount,
             workspaceId: info.workspaceId,
             workspaceName: info.workspaceName,
             port: runtime.port,
@@ -244,7 +255,9 @@ program
       const sandbox = trySandboxAllow();
       const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
-        ? persistWorkspaceEndpoint({
+        ? await persistWorkspaceEndpoint({
+            runtime,
+            tokenCount: info.tokenCount,
             workspaceId: info.workspaceId,
             workspaceName: info.workspaceName,
             port: runtime.port,
@@ -523,12 +536,10 @@ program
         const nextMcp = mcpUrlFromPublic(currentUrl);
         const decision = connectorRepairDecision(lastEndpoint?.mcpUrl, nextMcp, hasAuthorization);
         const action = decision.action;
-        if (decision.reason === "address_reclaimed" && hasAuthorization) {
-          await adminFetch(runtime, "POST", "/admin/revoke-all");
-          results.push("已清理旧连接授权");
-        }
         const boundName = nextMcp
-          ? persistWorkspaceEndpoint({
+          ? await persistWorkspaceEndpoint({
+              runtime,
+              tokenCount: info.tokenCount,
               workspaceId: info.workspaceId,
               workspaceName: info.workspaceName,
               port: runtime.port,
