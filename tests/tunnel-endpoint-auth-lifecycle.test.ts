@@ -77,7 +77,8 @@ async function adminInfo(bridge: Bridge): Promise<{ tokenCount: number; pairingA
     headers: { Authorization: `Bearer ${bridge.adminToken}` },
   });
   expect(response.ok).toBe(true);
-  return (await response.json()) as { tokenCount: number; pairingActive: boolean };
+  const body = (await response.json()) as { tokenCount: number; pairingActive: boolean };
+  return { tokenCount: body.tokenCount, pairingActive: body.pairingActive };
 }
 
 afterEach(async () => {
