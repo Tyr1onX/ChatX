@@ -272,7 +272,8 @@ export class AuthStore {
   }
 
   tokenCount(): number {
-    return this.tokens.size;
+    const now = Date.now();
+    return [...this.tokens.values()].filter((token) => !token.revoked && token.expiresAt > now).length;
   }
 
   static deleteStateFile(workspaceId: string): void {
