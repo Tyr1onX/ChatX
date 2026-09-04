@@ -111,9 +111,9 @@
   });
   const STATUS_VISUALS = Object.freeze({
     IDLE: Object.freeze({ tail: "_", kind: "idle", cursor: true }),
-    DEVELOPING: Object.freeze({ tail: "...", kind: "working", cursor: true }),
-    AUDITING: Object.freeze({ tail: "...", kind: "working", cursor: true }),
-    ROLLOVER: Object.freeze({ tail: "...", kind: "working", cursor: true }),
+    DEVELOPING: Object.freeze({ tail: "_", kind: "working", cursor: true }),
+    AUDITING: Object.freeze({ tail: "_", kind: "working", cursor: true }),
+    ROLLOVER: Object.freeze({ tail: "_", kind: "working", cursor: true }),
     COMPLETED: Object.freeze({ tail: "!", kind: "completed", cursor: false }),
     FAILED: Object.freeze({ tail: "×", kind: "failed", cursor: false }),
     STOPPED_USER: Object.freeze({ tail: "||", kind: "stopped", cursor: false }),
@@ -183,6 +183,7 @@
   }
 
   function statusCharacter(status) {
+    if (status === "DEVELOPING" || status === "AUDITING" || status === "ROLLOVER") return "X...";
     return `X${statusVisual(status).tail}`;
   }
 

@@ -37,6 +37,7 @@
     * { box-sizing: border-box; }
     button, input, textarea { font: inherit; }
     .launcher {
+      position: relative;
       width: 44px;
       height: 44px;
       padding: 0;
@@ -51,9 +52,27 @@
       touch-action: none;
       user-select: none;
     }
+    .launcher::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg 305deg,
+        color-mix(in srgb, CanvasText 58%, transparent) 305deg 355deg,
+        transparent 355deg 360deg
+      );
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+      mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+    }
     .launcher:hover { background: color-mix(in srgb, CanvasText 5%, Canvas); }
     .launcher.dragging { cursor: grabbing; }
     .launcher-mark {
+      position: relative;
+      z-index: 1;
       min-width: 26px;
       font: 750 16px/1 "Cascadia Mono", Consolas, monospace;
       letter-spacing: -0.06em;
@@ -67,24 +86,20 @@
     .launcher[data-visual="idle"] .launcher-tail {
       animation: chatx-cursor-blink 1.6s step-end infinite;
     }
-    .launcher[data-visual="working"] .launcher-tail {
-      width: 1ch;
-      overflow: hidden;
-      vertical-align: bottom;
-      animation: chatx-working-dots 2.4s step-end infinite;
+    .launcher[data-visual="working"]::before {
+      opacity: 1;
+      animation: chatx-terminal-scan 1.8s linear infinite;
     }
     @keyframes chatx-cursor-blink {
       0%, 54% { opacity: 1; }
       55%, 100% { opacity: 0.22; }
     }
-    @keyframes chatx-working-dots {
-      0%, 32% { width: 1ch; }
-      33%, 65% { width: 2ch; }
-      66%, 100% { width: 3ch; }
+    @keyframes chatx-terminal-scan {
+      to { transform: rotate(1turn); }
     }
     @media (prefers-reduced-motion: reduce) {
       .launcher-tail { animation: none !important; }
-      .launcher[data-visual="working"] .launcher-tail { width: 3ch; }
+      .launcher[data-visual="working"]::before { animation: none !important; }
     }
     .panel {
       position: absolute;

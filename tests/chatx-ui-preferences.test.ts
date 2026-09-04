@@ -107,46 +107,63 @@ describe("ChatX UI preferences", () => {
     expect(prefs.statusCharacter("FAILED")).toBe("X×");
     expect(prefs.statusCharacter("STOPPED_USER")).toBe("X||");
     expect(prefs.statusCharacter("STOPPED_MAX_GENERATIONS")).toBe("X||");
-    expect(prefs.statusVisual("DEVELOPING").kind).toBe("working");
-    expect(prefs.statusVisual("FAILED").kind).toBe("failed");
+    expect(prefs.statusVisual("IDLE")).toMatchObject({ tail: "_", kind: "idle" });
+    expect(prefs.statusVisual("DEVELOPING")).toMatchObject({ tail: "_", kind: "working" });
+    expect(prefs.statusVisual("AUDITING")).toMatchObject({ tail: "_", kind: "working" });
+    expect(prefs.statusVisual("ROLLOVER")).toMatchObject({ tail: "_", kind: "working" });
+    expect(prefs.statusVisual("COMPLETED")).toMatchObject({ tail: "!", kind: "completed" });
+    expect(prefs.statusVisual("FAILED")).toMatchObject({ tail: "×", kind: "failed" });
+    expect(prefs.statusVisual("STOPPED_USER")).toMatchObject({ tail: "||", kind: "stopped" });
+    expect(prefs.statusVisual("STOPPED_MAX_GENERATIONS")).toMatchObject({ tail: "||", kind: "stopped" });
     expect(prefs.runtimeMeta("zh-CN", 2, 3)).toBe("第 2 代 / 第 3 轮");
     expect(prefs.runtimeMeta("en", 2, 3)).toBe("G2 / R3");
   });
 
-  it("resolves launcher state from active Bridge work before Watcher work without letting Bridge terminal state mask Watcher", () => {
+  it("resolves launcher visuals without changing Bridge/Watcher priority", () => {
     const { prefs } = loadUiPrefs();
     const visual = (input: Parameters<typeof prefs.resolveLauncherVisual>[0]) => prefs.resolveLauncherVisual(input);
 
     expect(visual({
-      agentBridgeEnabled: true,
-      bridgeState: { status: "AUDITING", running: true },
-      watcherRunning: 3,
-    })).toMatchObject({ tail: "...", kind: "working" });
-    expect(visual({
-      agentBridgeEnabled: true,
-      bridgeState: { status: "IDLE", running: false },
-      watcherRunning: 1,
-    })).toMatchObject({ tail: "...", kind: "working" });
-    expect(visual({
-      agentBridgeEnabled: true,
-      bridgeState: { status: "COMPLETED", running: false },
-      watcherRunning: 1,
-    })).toMatchObject({ tail: "...", kind: "working" });
-    expect(visual({
-      agentBridgeEnabled: true,
-      bridgeState: { status: "IDLE", running: false },
+      agentBridgeEnabled: false,
+      bridgeState: null,
       watcherRunning: 0,
     })).toMatchObject({ tail: "_", kind: "idle" });
+
     expect(visual({
       agentBridgeEnabled: false,
+      bridgeState: null,
+      watcherRunning: 1,
+    })).toMatchObject({ tail: "_", kind: "working" });
+
+    for (const status of ["DEVELOPING", "AUDITING", "ROLLOVER"]) {
+      expect(visual({
+        agentBridgeEnabled: true,
+        bridgeState: { status, running: true },
+        watcherRunning: 3,
+      })).toMatchObject({ tail: "_", kind: "working" });
+    }
+
+    expect(visual({
+      agentBridgeEnabled: true,
       bridgeState: { status: "COMPLETED", running: false },
       watcherRunning: 1,
-    })).toMatchObject({ tail: "...", kind: "working" });
+    })).toMatchObject({ tail: "_", kind: "working" });
+
     expect(visual({
       agentBridgeEnabled: true,
       bridgeState: { status: "COMPLETED", running: false },
       watcherRunning: 0,
     })).toMatchObject({ tail: "!", kind: "completed" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "FAILED", running: false },
+      watcherRunning: 0,
+    })).toMatchObject({ tail: "×", kind: "failed" });
+    expect(visual({
+      agentBridgeEnabled: true,
+      bridgeState: { status: "STOPPED_USER", running: false },
+      watcherRunning: 0,
+    })).toMatchObject({ tail: "||", kind: "stopped" });
   });
 
   it("keeps terminal status mapping presentation-only", () => {
@@ -202,7 +219,17 @@ describe("ChatX UI preferences", () => {
     expect(floating).toContain('const DRAG_THRESHOLD = 4');
     expect(floating).toContain('@media (prefers-reduced-motion: reduce)');
     expect(floating).toContain('animation: chatx-cursor-blink 1.6s step-end infinite');
-    expect(floating).toContain('animation: chatx-working-dots 2.4s step-end infinite');
+    expect(floating).toContain('.launcher[data-visual="working"]::before');
+    expect(floating).toContain('background: conic-gradient(');
+    expect(floating).toContain('color-mix(in srgb, CanvasText 58%, transparent) 305deg 355deg');
+    expect(floating).toContain('animation: chatx-terminal-scan 1.8s linear infinite');
+    expect(floating).toContain('@keyframes chatx-terminal-scan');
+    expect(floating).toContain('to { transform: rotate(1turn); }');
+    expect(floating).toContain('.launcher[data-visual="working"]::before { animation: none !important; }');
+    expect(floating).not.toContain('chatx-working-dots');
+    expect(floating).not.toContain('width: 2ch');
+    expect(floating).not.toContain('width: 3ch');
     expect(floating).not.toMatch(/\bsetInterval\s*\(/);
+    expect(floating).not.toMatch(/requestAnimationFrame/);
   });
 });
