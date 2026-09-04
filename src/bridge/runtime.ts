@@ -18,6 +18,7 @@ export interface RuntimeState {
   adminToken: string;
   publicUrl: string | null;
   startedAt: string;
+  instanceId?: string;
 }
 
 export function runtimeFile(workspaceId: string): string {
@@ -45,9 +46,14 @@ export interface HealthPayload {
   version: string;
   workspaceId: string;
   status: string;
+  instanceId?: string;
 }
 
-export function isBridgeHealthPayload(value: unknown, workspaceId?: string): value is HealthPayload {
+export function isBridgeHealthPayload(
+  value: unknown,
+  workspaceId?: string,
+  instanceId?: string
+): value is HealthPayload {
   if (!value || typeof value !== "object") return false;
   const body = value as Partial<HealthPayload>;
   return (
@@ -55,14 +61,17 @@ export function isBridgeHealthPayload(value: unknown, workspaceId?: string): val
     body.status === "ok" &&
     typeof body.version === "string" &&
     typeof body.workspaceId === "string" &&
-    (workspaceId === undefined || body.workspaceId === workspaceId)
+    (body.instanceId === undefined || typeof body.instanceId === "string") &&
+    (workspaceId === undefined || body.workspaceId === workspaceId) &&
+    (instanceId === undefined || body.instanceId === instanceId)
   );
 }
 
 export async function probeBridgeHealth(
   baseUrl: string,
   workspaceId?: string,
-  timeoutMs = 2000
+  timeoutMs = 2000,
+  instanceId?: string
 ): Promise<HealthPayload | null> {
   try {
     const controller = new AbortController();
@@ -71,7 +80,8 @@ export async function probeBridgeHealth(
       const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, { signal: controller.signal });
       if (!response.ok) return null;
       const body = (await response.json()) as unknown;
-      return isBridgeHealthPayload(body, workspaceId) ? body : null;
+      const expectedInstanceId = instanceId ?? (workspaceId ? readRuntimeState(workspaceId)?.instanceId : undefined);
+      return isBridgeHealthPayload(body, workspaceId, expectedInstanceId) ? body : null;
     } finally {
       clearTimeout(timer);
     }
