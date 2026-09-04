@@ -25,12 +25,13 @@ it("keeps a live refresh authorization after the one-hour access token expires",
   expect(store.tokenCount()).toBe(2);
 
   vi.setSystemTime(new Date(now.getTime() + 2 * 60 * 60 * 1000));
-  const restarted = new AuthStore("workspace-live-refresh", { file });
+  expect(store.tokenCount()).toBe(1);
 
+  const restarted = new AuthStore("workspace-live-refresh", { file });
   expect(restarted.tokenCount()).toBe(1);
 });
 
-it("loads zero live authorization tokens after more than 30 days of inactivity", () => {
+it("reports zero live authorization tokens after more than 30 days of inactivity", () => {
   const root = makeTmpDir("auth-lifecycle-expired-refresh");
   cleanupDirs.push(root);
   const file = path.join(root, "auth.json");
@@ -45,7 +46,8 @@ it("loads zero live authorization tokens after more than 30 days of inactivity",
   expect(store.tokenCount()).toBe(2);
 
   vi.setSystemTime(new Date(now.getTime() + 31 * 24 * 60 * 60 * 1000));
-  const restarted = new AuthStore("workspace-expired-refresh", { file });
+  expect(store.tokenCount()).toBe(0);
 
+  const restarted = new AuthStore("workspace-expired-refresh", { file });
   expect(restarted.tokenCount()).toBe(0);
 });
