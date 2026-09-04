@@ -39,7 +39,7 @@ There is one supported remote connection model: Cloudflare provides HTTPS reacha
 | `src/browser/` | Dedicated Playwright browser controller |
 | `src/process/` | Background bridge lifecycle |
 | `src/execution/` | Execution summaries used for review/status workflows |
-| `src/cli/` | `chatx` CLI (`c2c` compatibility alias) |
+| `src/cli/` | `chatx` CLI |
 
 ## Local server
 
@@ -121,12 +121,11 @@ The controller does not automatically attach to the user's normal Chrome/Edge pr
 
 The external brand is ChatX, but the current alpha line intentionally preserves several identifiers so existing working installations are not disconnected:
 
-- default OS state directory remains `codex-with-chatgpt`
-- `c2c` CLI alias remains installed
-- legacy token prefixes remain unchanged
-- existing saved connector titles are retained
-- `C2C_*` environment variables remain fallbacks for new `CHATX_*` variables
-- `.c2cignore` remains supported alongside `.chatxignore`
+- the previous OS state directory remains in use
+- legacy token prefixes remain unchanged internally
+- saved legacy connector titles migrate to ChatX only after ChatGPT-side replacement is confirmed
+- legacy environment-variable aliases remain fallbacks for the current `CHATX_*` variables
+- the previous ignore filename remains supported alongside `.chatxignore`
 
 These are compatibility details, not parallel product paths. A future migration should remove them only with an explicit, tested state migration.
 

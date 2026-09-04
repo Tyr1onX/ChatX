@@ -18,7 +18,7 @@ export interface BearerAuthDeps {
 export function bearerAuth(deps: BearerAuthDeps) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const challenge = (error: string, description: string): string =>
-      `Bearer realm="c2c", error="${error}", error_description="${description}", ` +
+      `Bearer realm="chatx", error="${error}", error_description="${description}", ` +
       `resource_metadata="${deps.getBaseUrl(req)}/.well-known/oauth-protected-resource/mcp"`;
 
     const header = req.headers.authorization;

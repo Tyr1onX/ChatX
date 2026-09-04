@@ -90,7 +90,7 @@ export async function probeBridgeHealth(
   }
 }
 
-/** Probe a port and check whether a healthy c2c bridge answers. */
+/** Probe a port and check whether a healthy ChatX bridge answers. */
 export async function probeBridge(
   port: number,
   timeoutMs = 2000

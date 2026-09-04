@@ -10,7 +10,7 @@ export function hostnameSlug(workspaceName: string, workspaceId: string): string
     .replace(/^-+|-+$/g, "")
     .slice(0, 30);
   const label = ascii || `ws-${workspaceId.slice(0, 8)}`;
-  return `c2c-${label}`;
+  return `chatx-${label}`;
 }
 
 export function suggestedNamedHostname(

@@ -14,7 +14,7 @@ chatx doctor
 chatx doctor --no-fix
 ```
 
-> `chatx` 是当前主命令；旧的 `c2c` 仍然作为兼容别名保留。
+> `chatx` 是当前唯一对外主命令；旧命令别名仅保留内部兼容。
 
 ## 先判断问题在哪一层
 
@@ -224,6 +224,16 @@ chatx pair
 
 如果公网地址也已经变化，则使用新的地址按同一条「新插件 → 服务器 URL → OAuth」路线重新创建当前 Workspace 的插件。
 
+## 安全重命名 Workspace
+
+需要把项目目录改为 `ChatX-Workspace` 时，不要直接在文件管理器里重命名。使用：
+
+```bash
+chatx workspace-rename -w <当前目录> --to ChatX-Workspace
+```
+
+ChatX 会先停止该 Workspace 的 Bridge，迁移与路径绑定的 OAuth、会话、连接地址、固定域名配置和执行记录，再从新目录恢复连接。已有固定域名和 MCP 地址保持不变；运行时 PID 状态不会迁移。
+
 ## `ACCESS_DENIED_SENSITIVE_FILE`
 
 这是预期的安全行为，不是程序故障。
@@ -235,7 +245,7 @@ ChatX 默认拒绝通过 AI 读取或写入一些敏感文件，例如：
 - 云服务凭据
 - 私钥 / service-account 文件
 - `.npmrc`
-- 被 `.chatxignore` / `.c2cignore` 匹配的文件
+- 被 `.chatxignore` 或旧版兼容忽略规则匹配的文件
 
 `.env.example` 等公开示例文件可以正常访问。
 

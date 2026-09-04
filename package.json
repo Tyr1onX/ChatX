@@ -5,8 +5,7 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "chatx": "./bin/c2c.js",
-    "c2c": "./bin/c2c.js"
+    "chatx": "./bin/chatx.js"
   },
   "files": [
     "bin/",
