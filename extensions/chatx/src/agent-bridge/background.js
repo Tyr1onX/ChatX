@@ -1,8 +1,10 @@
 import "../features.js";
 import "./protocol.js";
+import "./bindings.js";
 
 const Protocol = globalThis.ChatGptBridgeProtocol;
 const Features = globalThis.ChatXFeatures;
+const Bindings = globalThis.ChatXAgentBridgeBindings;
 const STATE_KEY = "runtimeProof";
 const DEFAULT_MAX_ROUNDS = 6;
 const DEFAULT_MAX_GENERATIONS = 3;
@@ -45,13 +47,14 @@ function emptyState() {
     rolloverStatus: null,
     agentTabsCreatedThisRun: 0,
     generationCreatedFor: {},
+    bindings: Bindings.emptyBindings(),
     updatedAt: Date.now(),
   };
 }
 
 function normalizeStoredState(stored) {
   if (!stored) return emptyState();
-  if (stored.version === 4) return { ...emptyState(), ...stored };
+  if (stored.version === 4) return { ...emptyState(), ...stored, bindings: Bindings.normalizeBindings(stored.bindings) };
   return {
     ...emptyState(),
     ...stored,
@@ -63,6 +66,7 @@ function normalizeStoredState(stored) {
     checkpointId: stored.checkpointId ?? null,
     initialTask: stored.initialTask ?? null,
     checkpoint: stored.checkpoint ?? null,
+    bindings: Bindings.normalizeBindings(stored.bindings),
     rolloverStatus: stored.rolloverStatus ?? null,
   };
 }
@@ -1377,7 +1381,20 @@ async function getPublicUiState() {
       ? state.maxGenerations
       : DEFAULT_MAX_GENERATIONS,
     running: RUNNING_STATUSES.has(state.status),
+    bindings: Bindings.normalizeBindings(state.bindings),
   };
+}
+
+async function bindConversation(role, conversation) {
+  await assertFeatureEnabled();
+  if (role !== "developer" && role !== "auditor") throw new Error("INVALID_AGENT_ROLE");
+  const state = await getState();
+  if (RUNNING_STATUSES.has(state.status)) throw new Error("STOP_CURRENT_RUN_BEFORE_REASSIGN");
+  await putState({
+    ...state,
+    bindings: Bindings.bind(state.bindings, role, conversation),
+  });
+  return getPublicUiState();
 }
 
 async function assignAgent(role, tabId) {
@@ -1487,6 +1504,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let state;
         if (message.type === "BRIDGE_UI_STATE") {
           state = await getPublicUiState();
+        } else if (message.type === "BRIDGE_BIND_CONVERSATION") {
+          state = await bindConversation(message.role, message.conversation);
         } else if (message.type === "BRIDGE_ASSIGN") {
           state = await assignAgent(message.role, message.tabId ?? contentTabId);
         } else if (message.type === "BRIDGE_START") {

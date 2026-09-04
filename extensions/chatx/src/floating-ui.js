@@ -5,6 +5,7 @@
   const Features = globalThis.ChatXFeatures;
   const Prefs = globalThis.ChatXUiPrefs;
   const Ui = globalThis.ChatXUiApi;
+  const Bindings = globalThis.ChatXAgentBridgeBindings;
   const BUBBLE_SIZE = 44;
   const DEFAULT_OFFSET = 20;
   const PANEL_GAP = 10;
@@ -18,6 +19,8 @@
   let bubblePosition = null;
   let dragState = null;
   let noticeError = null;
+  let conversationDragPanelWasOpen = null;
+  const conversationDrag = Bindings.createDragSession();
 
   const host = document.createElement("div");
   host.id = HOST_ID;
@@ -157,6 +160,47 @@
       border-top: 1px solid color-mix(in srgb, CanvasText 11%, transparent);
     }
     .bridge[hidden] { display: none; }
+    .binding-zones {
+      display: grid;
+      gap: 6px;
+      margin: 8px 0 10px;
+    }
+    .binding-zones[hidden] { display: none; }
+    .binding-zone {
+      min-width: 0;
+      padding: 3px 0;
+      font-size: 12px;
+    }
+    .binding-zone-label, .drop-hint {
+      font-family: "Cascadia Mono", Consolas, monospace;
+    }
+    .binding-zone-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      opacity: 0.66;
+    }
+    .binding-value {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .drop-hint { display: none; margin-top: 3px; font-weight: 700; }
+    .binding-zones.drag-active .binding-zone {
+      padding: 8px;
+      border: 1px dashed color-mix(in srgb, CanvasText 28%, transparent);
+      border-radius: 6px;
+      background: color-mix(in srgb, CanvasText 3%, transparent);
+    }
+    .binding-zones.drag-active .binding-value { display: none; }
+    .binding-zones.drag-active .drop-hint { display: block; }
+    .binding-zones.drag-active .binding-zone.drag-over {
+      border-color: CanvasText;
+      background: color-mix(in srgb, CanvasText 9%, transparent);
+    }
     .agents, .runtime { display: grid; gap: 4px; font-size: 12px; }
     .agents { margin-bottom: 9px; }
     .runtime {
@@ -230,6 +274,18 @@
     <label class="feature-row"><span data-i18n="watcher">任务监听</span><input id="watcherToggle" type="checkbox"></label>
     <label class="feature-row"><span data-i18n="sessionGuard">会话保护</span><input id="sessionGuardToggle" type="checkbox"></label>
     <label class="feature-row"><span data-i18n="agentBridge">Agent Bridge / 智能协作</span><input id="agentBridgeToggle" type="checkbox"></label>
+    <section id="bindingZones" class="binding-zones" hidden>
+      <div class="binding-zone" data-bind-role="developer">
+        <div class="binding-zone-label">&gt; EXECUTOR / 执行窗口</div>
+        <strong id="developerBinding" class="binding-value">—</strong>
+        <div class="drop-hint">DROP HERE_</div>
+      </div>
+      <div class="binding-zone" data-bind-role="auditor">
+        <div class="binding-zone-label">&gt; AUDITOR / 审计窗口</div>
+        <strong id="auditorBinding" class="binding-value">—</strong>
+        <div class="drop-hint">DROP HERE_</div>
+      </div>
+    </section>
     <section id="agentBridgeControls" class="bridge" hidden>
       <div class="agents">
         <div><span data-i18n="developer">开发者</span>: <strong id="developerState">未指定</strong></div>
@@ -382,6 +438,17 @@
       || !taskReady;
   }
 
+  function renderBindings() {
+    const bindings = currentState?.bindings ?? Bindings.emptyBindings();
+    const developer = bindings.developer;
+    const auditor = bindings.auditor;
+    $("developerBinding").textContent = developer ? `✓ ${developer.title}` : "—";
+    $("auditorBinding").textContent = auditor ? `✓ ${auditor.title}` : "—";
+    $("bindingZones").hidden = !features.agentBridge
+      || (!conversationDrag.current() && !developer && !auditor);
+    positionPanel();
+  }
+
   function renderBridge(state, hydrateInputs = false) {
     currentState = state;
     $("developerState").textContent = Prefs.t(uiPrefs.language, state.developerAssigned ? "assigned" : "missing");
@@ -405,6 +472,7 @@
     $("assignDeveloper").disabled = running;
     $("assignAuditor").disabled = running;
     $("stop").disabled = !running;
+    renderBindings();
     renderLauncherVisual();
     updateStartEnabled();
   }
@@ -414,7 +482,11 @@
     $("sessionGuardToggle").checked = features.sessionGuard;
     $("agentBridgeToggle").checked = features.agentBridge;
     $("agentBridgeControls").hidden = !features.agentBridge;
-    if (!features.agentBridge) clearNotice();
+    if (!features.agentBridge) {
+      clearNotice();
+      endConversationDrag();
+    }
+    renderBindings();
     renderLauncherVisual();
     positionPanel();
   }
@@ -449,6 +521,30 @@
     } finally {
       input.disabled = false;
     }
+  }
+
+  function endConversationDrag({ keepPanelOpen = false } = {}) {
+    if (!conversationDrag.current()) return;
+    conversationDrag.clear();
+    $("bindingZones").classList.remove("drag-active");
+    shadow.querySelectorAll("[data-bind-role]").forEach((zone) => zone.classList.remove("drag-over"));
+    renderBindings();
+    if (!keepPanelOpen && conversationDragPanelWasOpen === false) setPanelOpen(false);
+    conversationDragPanelWasOpen = null;
+  }
+
+  function onConversationDragStart(event) {
+    if (!features.agentBridge) return;
+    const source = conversationDrag.start(event);
+    if (!source) return;
+    conversationDragPanelWasOpen = !panel.hidden;
+    $("bindingZones").classList.add("drag-active");
+    renderBindings();
+    setPanelOpen(true);
+  }
+
+  function onConversationDragEnd() {
+    endConversationDrag();
   }
 
   function finishDrag(event) {
@@ -507,6 +603,38 @@
       return;
     }
     setPanelOpen(panel.hidden);
+  });
+
+  document.addEventListener("dragstart", onConversationDragStart, true);
+  document.addEventListener("dragend", onConversationDragEnd, true);
+
+  shadow.querySelectorAll("[data-bind-role]").forEach((zone) => {
+    zone.addEventListener("dragenter", () => {
+      if (conversationDrag.current()) zone.classList.add("drag-over");
+    });
+    zone.addEventListener("dragover", (event) => {
+      if (!conversationDrag.current()) return;
+      event.preventDefault();
+      zone.classList.add("drag-over");
+    });
+    zone.addEventListener("dragleave", (event) => {
+      if (event.relatedTarget instanceof Node && zone.contains(event.relatedTarget)) return;
+      zone.classList.remove("drag-over");
+    });
+    zone.addEventListener("drop", async (event) => {
+      const source = conversationDrag.current();
+      const role = zone.dataset.bindRole;
+      if (!source || (role !== "developer" && role !== "auditor")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      endConversationDrag({ keepPanelOpen: true });
+      try {
+        clearNotice();
+        renderBridge(await Ui.bindConversation(role, source));
+      } catch (error) {
+        showError(error);
+      }
+    });
   });
 
   shadow.querySelector(".close").addEventListener("click", () => setPanelOpen(false));

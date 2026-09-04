@@ -44,6 +44,7 @@
       "js": [
         "src/features.js",
         "src/ui-prefs.js",
+        "src/agent-bridge/bindings.js",
         "src/ui-api.js",
         "src/watcher/selectors.js",
         "src/watcher/content.js",

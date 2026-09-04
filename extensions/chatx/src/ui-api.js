@@ -24,6 +24,10 @@
     return (await message("BRIDGE_UI_STATE")).state;
   }
 
+  async function bindConversation(role, conversation) {
+    return (await message("BRIDGE_BIND_CONVERSATION", { role, conversation })).state;
+  }
+
   async function assign(role, tabId) {
     const payload = { role };
     if (Number.isInteger(tabId)) payload.tabId = tabId;
@@ -48,6 +52,7 @@
     getFeatures,
     setFeature,
     getBridgeState,
+    bindConversation,
     assign,
     start,
     stop,
