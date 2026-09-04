@@ -78,6 +78,8 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
       this.child = child;
       this.connected = false;
       this.lastError = null;
+      let established = false;
+      let childLastError: string | null = null;
       let settled = false;
 
       const finish = (fn: () => void): void => {
@@ -87,24 +89,31 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
         fn();
       };
       const timeout = setTimeout(() => {
-        if (this.connected) return;
-        this.lastError = "Named tunnel start timed out";
-        child.kill("SIGTERM");
-        finish(() => reject(new Error(this.lastError ?? "Named tunnel start timed out")));
+        if (established) return;
+        childLastError = "Named tunnel start timed out";
+        if (this.child === child) {
+          this.lastError = childLastError;
+          child.kill("SIGTERM");
+        }
+        finish(() => reject(new Error(childLastError ?? "Named tunnel start timed out")));
       }, this.startTimeoutMs);
 
       const scan = (stream: NodeJS.ReadableStream): void => {
         const rl = readline.createInterface({ input: stream });
         rl.on("line", (line) => {
-          if (CONNECTED_RE.test(line) && !this.connected) {
+          if (CONNECTED_RE.test(line) && this.child === child && !established) {
+            established = true;
             this.connected = true;
             const url = this.publicUrl();
             this.logger.info(`Named tunnel established: ${url}`);
             finish(() => resolve(url));
           }
           if (/\b(error|failed|fatal)\b/i.test(line)) {
-            this.lastError = line.slice(0, 400);
-            this.logger.debug(`cloudflared: ${line.slice(0, 400)}`);
+            childLastError = line.slice(0, 400);
+            if (this.child === child) {
+              this.lastError = childLastError;
+              this.logger.debug(`cloudflared: ${childLastError}`);
+            }
           }
         });
       };
@@ -112,21 +121,25 @@ export class CloudflaredNamedTunnel implements TunnelProvider {
       if (child.stderr) scan(child.stderr);
 
       child.on("error", (error) => {
-        this.child = null;
-        this.connected = false;
+        if (this.child === child) {
+          this.child = null;
+          this.connected = false;
+        }
         finish(() => reject(error));
       });
       child.on("exit", (code) => {
-        const wasStarting = !this.connected;
+        const wasStarting = !established;
         this.logger.warn(`cloudflared named tunnel exited with code ${code}`);
-        this.child = null;
-        this.connected = false;
+        if (this.child === child) {
+          this.child = null;
+          this.connected = false;
+        }
         if (wasStarting) {
           finish(() =>
             reject(
               new Error(
                 `cloudflared exited (code ${code}) before establishing the named tunnel${
-                  this.lastError ? `: ${this.lastError}` : ""
+                  childLastError ? `: ${childLastError}` : ""
                 }`
               )
             )
