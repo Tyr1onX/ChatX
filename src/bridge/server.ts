@@ -15,7 +15,7 @@ import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
-import { writeRuntimeState, clearRuntimeState, type RuntimeState } from "./runtime.js";
+import { writeRuntimeState, clearRuntimeState, probeBridgeHealth, type RuntimeState } from "./runtime.js";
 import { BrowserController } from "../browser/controller.js";
 import { ProcessSessionManager } from "../process/session-manager.js";
 
@@ -93,6 +93,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   const browser = new BrowserController();
   const processes = new ProcessSessionManager(workspace);
   const adminToken = `c2c_admin_${randomBytes(24).toString("base64url")}`;
+  const instanceId = randomBytes(16).toString("base64url");
 
   let publicBaseUrl: string | null = null;
   let tunnelStartPromise: Promise<string> | null = null;
@@ -114,25 +115,29 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
   const startTunnel = (): Promise<string> => {
     if (tunnelStartPromise) return tunnelStartPromise;
-    const status = tunnel.status();
-    if (status.running && status.url) {
-      publicBaseUrl = status.url;
-      persistRuntime();
-      return Promise.resolve(status.url);
-    }
-    tunnelStartPromise = tunnel
-      .start(port)
-      .then((url) => {
-        if (!closed) {
-          publicBaseUrl = url;
-          tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+    tunnelStartPromise = (async () => {
+      const status = tunnel.status();
+      if (status.running && status.url) {
+        const health = await probeBridgeHealth(status.url, workspace.id, 8000, instanceId);
+        if (health) {
+          publicBaseUrl = status.url;
           persistRuntime();
+          return status.url;
         }
-        return url;
-      })
-      .finally(() => {
-        tunnelStartPromise = null;
-      });
+        await tunnel.stop();
+        publicBaseUrl = null;
+        persistRuntime();
+      }
+      const url = await tunnel.start(port);
+      if (!closed) {
+        publicBaseUrl = url;
+        tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
+        persistRuntime();
+      }
+      return url;
+    })().finally(() => {
+      tunnelStartPromise = null;
+    });
     return tunnelStartPromise;
   };
 
@@ -171,7 +176,13 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   };
 
   app.get("/health", (_req, res) => {
-    res.json({ service: SERVICE_NAME, version: VERSION, workspaceId: workspace.id, status: "ok" });
+    res.json({
+      service: SERVICE_NAME,
+      version: VERSION,
+      workspaceId: workspace.id,
+      instanceId,
+      status: "ok",
+    });
   });
 
   app.use(
@@ -217,15 +228,21 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   });
 
   app.get("/admin/info", adminGuard, (_req, res) => {
+    const tunnelStatus = tunnel.status();
+    if (!tunnelStatus.running && publicBaseUrl) {
+      publicBaseUrl = null;
+      persistRuntime();
+    }
     res.json({
       service: SERVICE_NAME,
       version: VERSION,
       workspaceId: workspace.id,
+      instanceId,
       workspaceName: workspace.name,
       workspaceRoot: workspace.root,
       port,
       publicUrl: publicBaseUrl,
-      tunnel: tunnel.status(),
+      tunnel: tunnelStatus,
       tokenCount: authStore.tokenCount(),
       pairingActive: pairing.hasActiveSession(),
       pid: process.pid,
@@ -287,6 +304,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       adminToken,
       publicUrl: publicBaseUrl,
       startedAt,
+      instanceId,
     };
     writeRuntimeState(state);
   };

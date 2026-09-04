@@ -32,8 +32,26 @@ function quoteCmdArg(value) {
 
 function runNpm(args, opts = {}) {
   if (process.platform !== "win32") return run("npm", args, opts);
+
+  // A timeout against `cmd.exe /c npm ...` only terminates cmd.exe and can
+  // leave npm's Node process alive with handles open inside installDir. Run
+  // npm's JS entrypoint directly when using the standard Windows Node layout
+  // so timeout/exit semantics apply to the actual npm process.
+  const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  if (fs.existsSync(npmCli)) return run(process.execPath, [npmCli, ...args], opts);
+
   const command = `npm ${args.map(quoteCmdArg).join(" ")}`;
   return run(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", command], opts);
+}
+
+function cleanupTempDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error) {
+    // Cleanup is best-effort on ephemeral CI runners. Never let an EBUSY from
+    // a temporary directory hide the real pack/install/CLI failure above.
+    process.stderr.write(`release-smoke cleanup warning for ${dir}: ${(error instanceof Error ? error.message : String(error))}\n`);
+  }
 }
 
 try {
@@ -50,7 +68,10 @@ try {
 
   const tarball = path.join(packDir, record.filename);
   fs.writeFileSync(path.join(installDir, "package.json"), JSON.stringify({ private: true }, null, 2));
-  runNpm(["install", "--ignore-scripts", tarball], { cwd: installDir, timeout: 180000 });
+  runNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+    cwd: installDir,
+    timeout: 180000,
+  });
 
   const installedRoot = path.join(installDir, "node_modules", pkg.name);
   const cli = path.join(installedRoot, "bin", "c2c.js");
@@ -68,6 +89,6 @@ try {
 
   process.stdout.write(`release-smoke ok: ${pkg.name}@${pkg.version}, ${record.entryCount} packed files\n`);
 } finally {
-  fs.rmSync(packDir, { recursive: true, force: true });
-  fs.rmSync(installDir, { recursive: true, force: true });
+  cleanupTempDir(installDir);
+  cleanupTempDir(packDir);
 }

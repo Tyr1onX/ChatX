@@ -18,6 +18,7 @@ export interface RuntimeState {
   adminToken: string;
   publicUrl: string | null;
   startedAt: string;
+  instanceId?: string;
 }
 
 export function runtimeFile(workspaceId: string): string {
@@ -45,25 +46,56 @@ export interface HealthPayload {
   version: string;
   workspaceId: string;
   status: string;
+  instanceId?: string;
 }
 
-/** Probe a port and check whether a healthy c2c bridge for the workspace answers. */
-export async function probeBridge(
-  port: number,
-  timeoutMs = 2000
+export function isBridgeHealthPayload(
+  value: unknown,
+  workspaceId?: string,
+  instanceId?: string
+): value is HealthPayload {
+  if (!value || typeof value !== "object") return false;
+  const body = value as Partial<HealthPayload>;
+  return (
+    body.service === SERVICE_NAME &&
+    body.status === "ok" &&
+    typeof body.version === "string" &&
+    typeof body.workspaceId === "string" &&
+    (body.instanceId === undefined || typeof body.instanceId === "string") &&
+    (workspaceId === undefined || body.workspaceId === workspaceId) &&
+    (instanceId === undefined || body.instanceId === instanceId)
+  );
+}
+
+export async function probeBridgeHealth(
+  baseUrl: string,
+  workspaceId?: string,
+  timeoutMs = 2000,
+  instanceId?: string
 ): Promise<HealthPayload | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!response.ok) return null;
-    const body = (await response.json()) as HealthPayload;
-    if (body.service !== SERVICE_NAME) return null;
-    return body;
+    try {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, { signal: controller.signal });
+      if (!response.ok) return null;
+      const body = (await response.json()) as unknown;
+      const expectedInstanceId = instanceId ?? (workspaceId ? readRuntimeState(workspaceId)?.instanceId : undefined);
+      return isBridgeHealthPayload(body, workspaceId, expectedInstanceId) ? body : null;
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     return null;
   }
+}
+
+/** Probe a port and check whether a healthy c2c bridge answers. */
+export async function probeBridge(
+  port: number,
+  timeoutMs = 2000
+): Promise<HealthPayload | null> {
+  return probeBridgeHealth(`http://127.0.0.1:${port}`, undefined, timeoutMs);
 }
 
 export async function findLiveBridge(workspaceId: string): Promise<RuntimeState | null> {

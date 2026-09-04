@@ -4,7 +4,13 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startBridge } from "../bridge/server.js";
-import { findLiveBridge, probeBridge, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
+import {
+  findLiveBridge,
+  probeBridge,
+  probeBridgeHealth,
+  readRuntimeState,
+  type RuntimeState,
+} from "../bridge/runtime.js";
 import { adminFetch, ensureBridge, stopBridge } from "../process/daemon.js";
 import { Workspace } from "../workspace/manager.js";
 import { AuthStore } from "../auth/store.js";
@@ -488,12 +494,7 @@ program
       let currentUrl = info.publicUrl ?? info.tunnel.url;
       let healthy = false;
       if (currentUrl) {
-        try {
-          const response = await fetch(`${currentUrl}/health`, { signal: AbortSignal.timeout(8000) });
-          healthy = response.ok;
-        } catch {
-          healthy = false;
-        }
+        healthy = Boolean(await probeBridgeHealth(currentUrl, info.workspaceId, 8000));
       }
 
       if ((!currentUrl || !healthy) && opts.fix && (expectedPublic || info.tunnel.running)) {
@@ -506,11 +507,13 @@ program
             if (started.url) {
               const previousUrl = lastEndpoint?.publicUrl;
               currentUrl = started.url;
-              healthy = true;
               info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+              healthy = Boolean(await probeBridgeHealth(currentUrl, info.workspaceId, 8000));
               const sameAddress =
                 previousUrl && normalizePublicUrl(previousUrl) === normalizePublicUrl(started.url);
-              results.push(sameAddress ? "已重新建立安全连接" : "已重新建立安全连接（地址已更换）");
+              if (healthy) {
+                results.push(sameAddress ? "已重新建立安全连接" : "已重新建立安全连接（地址已更换）");
+              }
             }
           }
         } catch (error) {
