@@ -70,4 +70,26 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Audit production dependencies
-        run: corepack pnpm@11.25.0 audit --prod --pm-on-fail=ignore
+        shell: bash
+        run: |
+          set +e
+          corepack pnpm@11.25.0 audit --prod --pm-on-fail=ignore 2>&1 | tee audit.log
+          audit_exit=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$audit_exit" -eq 0 ]; then
+            echo "### Production dependency audit: PASS" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if grep -Fq '/-/npm/v1/security/advisories/bulk' audit.log \
+            && grep -Eiq '(ERR_SOCKET_TIMEOUT|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|error \((408|429|5[0-9]{2})\)|responded with (408|429|5[0-9]{2})| - (408|429|5[0-9]{2})([^0-9]|$))' audit.log; then
+            echo '::warning title=Production dependency audit unavailable::npm registry audit service/network unavailable; no vulnerability verdict was produced.'
+            {
+              echo '### Production dependency audit: INFRASTRUCTURE UNAVAILABLE'
+              echo 'The npm bulk advisory service did not return a vulnerability verdict. Product CI remains valid; rerun the audit when the service recovers.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          exit "$audit_exit"
