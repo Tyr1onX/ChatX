@@ -1,0 +1,110 @@
+* { box-sizing: border-box; }
+
+body {
+  width: 340px;
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+main { padding: 14px; }
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+}
+
+.feature-row > span {
+  display: grid;
+  gap: 2px;
+}
+
+.feature-row small {
+  font-size: 12px;
+  opacity: 0.68;
+}
+
+.feature-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+#agentBridgeControls {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+}
+
+.agents,
+.runtime {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+label[for="task"] {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+textarea,
+input[type="number"] {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 6px;
+  background: Canvas;
+  color: CanvasText;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 78px;
+  padding: 7px 8px;
+}
+
+input[type="number"] { padding: 6px 7px; }
+
+.budget-grid,
+.button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.budget-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+button {
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 6px;
+  background: Canvas;
+  color: CanvasText;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled { cursor: default; opacity: 0.5; }
+
+.runtime { margin: 10px 0 0; }
+
+#notice {
+  margin: 8px 0 0;
+  font-size: 12px;
+}

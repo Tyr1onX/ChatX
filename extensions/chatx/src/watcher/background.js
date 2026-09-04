@@ -1,3 +1,5 @@
+import "../features.js";
+
 import {
   RunState,
   acknowledgeRun,
@@ -15,7 +17,7 @@ import {
 } from "./state.js";
 
 const STATE_KEY = "watcherState";
-const SETTINGS_KEY = "settings";
+const Features = globalThis.ChatXFeatures;
 
 let stateCache = null;
 let writeQueue = Promise.resolve();
@@ -47,8 +49,8 @@ function withSenderMetadata(message, sender) {
 }
 
 async function isEnabled() {
-  const stored = await chrome.storage.local.get({ [SETTINGS_KEY]: { enabled: true } });
-  return stored[SETTINGS_KEY]?.enabled !== false;
+  const features = await Features.get();
+  return features.watcher;
 }
 
 function isEligibleOverlayTab(tab) {
@@ -134,6 +136,7 @@ async function handleRunStarted(message, sender) {
 }
 
 async function handleRunActivity(message, sender) {
+  if (!(await isEnabled())) return { ignored: true };
   const state = await loadState();
   const run = recordActivity(
     state,
@@ -146,6 +149,7 @@ async function handleRunActivity(message, sender) {
 }
 
 async function handleFinishCandidate(message, sender) {
+  if (!(await isEnabled())) return { ignored: true };
   const state = await loadState();
   const result = markFinishCandidate(
     state,
@@ -162,6 +166,7 @@ async function handleFinishCandidate(message, sender) {
 }
 
 async function handleFinishConfirmed(message, sender) {
+  if (!(await isEnabled())) return { ignored: true };
   const state = await loadState();
   const metadata = {
     ...withSenderMetadata(message, sender),
@@ -200,6 +205,7 @@ async function acknowledgeConversation(conversationId) {
 }
 
 async function handleAcknowledge(message, sender) {
+  if (!(await isEnabled())) return { acknowledged: false, ignored: true };
   const metadata = withSenderMetadata(message, sender);
   if (!metadata.conversationId || !sender.tab?.id || !sender.tab.active) {
     return { acknowledged: false };
@@ -222,7 +228,7 @@ async function handleAcknowledge(message, sender) {
 }
 
 async function registerConversation() {
-  return { registered: true };
+  return (await isEnabled()) ? { registered: true } : { registered: false, ignored: true };
 }
 
 async function getStatus() {
@@ -232,26 +238,13 @@ async function getStatus() {
   const running = state.runs.filter(
     (run) => run.state === RunState.RUNNING || run.state === RunState.FINISH_CANDIDATE
   ).length;
-  const stored = await chrome.storage.local.get({ [SETTINGS_KEY]: { enabled: true } });
+  const features = await Features.get();
   return {
-    enabled: stored[SETTINGS_KEY]?.enabled !== false,
+    enabled: features.watcher,
     watchedTabs: tabs.length,
     completed,
     running,
   };
-}
-
-async function setEnabled(enabled) {
-  const settings = { enabled: Boolean(enabled) };
-  await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
-  const tabs = await chrome.tabs.query({ url: ["https://chatgpt.com/*"] });
-  await Promise.allSettled(
-    tabs
-      .filter((tab) => tab.id != null)
-      .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "CONFIG_CHANGED", enabled: settings.enabled }))
-  );
-  if (settings.enabled) void tryPresentPendingCompletion();
-  return settings;
 }
 
 async function focusConversation(run) {
@@ -299,6 +292,7 @@ async function hideOverlay(tabId, runId) {
 }
 
 async function handleOpenCompletion(message, sender) {
+  if (!(await isEnabled())) return { viewed: false, acknowledged: false, ignored: true };
   const state = await loadState();
   const run = message.runId ? getRun(state, message.runId) : getPendingDoneRuns(state)[0] ?? null;
   if (!run || run.state !== RunState.DONE) {
@@ -342,18 +336,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return getStatus();
       case "OPEN_COMPLETION":
         return handleOpenCompletion(message, sender);
-      case "SET_ENABLED":
-        return setEnabled(message.enabled);
       default:
-        return Promise.resolve({ ignored: true });
+        return null;
     }
   })();
 
+  if (!task) return false;
   task.then(sendResponse).catch(() => sendResponse({ error: "watcher_error" }));
   return true;
 });
 
 async function requestAckCheck(tabId) {
+  if (!(await isEnabled())) return;
   if (tabId == null) return;
   try {
     await chrome.tabs.sendMessage(tabId, { type: "ACK_CHECK" });
@@ -376,13 +370,10 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   void tryPresentPendingCompletion();
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  void chrome.storage.local.get(SETTINGS_KEY).then((stored) => {
-    if (!stored[SETTINGS_KEY]) {
-      return chrome.storage.local.set({ [SETTINGS_KEY]: { enabled: true } });
-    }
-    return undefined;
-  });
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[Features.KEY]) return;
+  const next = Features.normalize(changes[Features.KEY].newValue);
+  if (next.watcher) void tryPresentPendingCompletion();
 });
 
 export {

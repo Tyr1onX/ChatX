@@ -14,7 +14,7 @@ import {
   recordActivity,
   reduceIgnoredUiEvent,
   startRun,
-} from "../extensions/chatx-watcher/src/state.js";
+} from "../extensions/chatx/src/watcher/state.js";
 
 const baseMetadata = {
   conversationId: "conversation-a",

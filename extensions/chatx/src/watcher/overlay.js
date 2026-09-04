@@ -184,11 +184,21 @@ function showOverlay({ runId, title }) {
   return true;
 }
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[globalThis.ChatXFeatures.KEY]) return;
+  const next = globalThis.ChatXFeatures.normalize(changes[globalThis.ChatXFeatures.KEY].newValue);
+  if (!next.watcher) removeOverlay();
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "SHOW_COMPLETION_OVERLAY") {
-    const shown = showOverlay({ runId: message.runId, title: message.title });
-    sendResponse({ shown, runId: message.runId ?? null });
-    return false;
+    void globalThis.ChatXFeatures.get().then((features) => {
+      const shown = features.watcher
+        ? showOverlay({ runId: message.runId, title: message.title })
+        : false;
+      sendResponse({ shown, runId: message.runId ?? null });
+    });
+    return true;
   }
 
   if (message?.type === "HIDE_COMPLETION_OVERLAY") {
