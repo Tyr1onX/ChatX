@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { Workspace } from "../workspace/manager.js";
+import { buildCompatibleProcessEnvironment } from "./compatible-environment.js";
 import { prepareSpawnCommand } from "./spawn-command.js";
 
 const MAX_RUNNING_SESSIONS = 8;
@@ -167,6 +168,7 @@ export class ProcessSessionManager {
     const prepared = prepareSpawnCommand(input.command, args);
     const child = spawn(prepared.command, prepared.args, {
       cwd: cwd.abs,
+      env: buildCompatibleProcessEnvironment(),
       windowsHide: true,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
