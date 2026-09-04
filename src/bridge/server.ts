@@ -14,6 +14,7 @@ import type { TunnelProvider } from "../tunnel/provider.js";
 import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
+import { connectorAction, mcpUrlFromPublic, readLastEndpoint } from "../config/endpoint.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
 import { writeRuntimeState, clearRuntimeState, probeBridgeHealth, type RuntimeState } from "./runtime.js";
 import { BrowserController } from "../browser/controller.js";
@@ -113,6 +114,15 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     return `${proto}://${hostHeader}`;
   };
 
+  const revokeStaleAuthorizationFor = (url: string): void => {
+    const previousMcpUrl = readLastEndpoint(workspace.id)?.mcpUrl;
+    const nextMcpUrl = mcpUrlFromPublic(url);
+    if (authStore.tokenCount() <= 0 || connectorAction(previousMcpUrl, nextMcpUrl) !== "update") return;
+    const count = authStore.revokeAll();
+    pairing.invalidateAll();
+    logger.info(`Revoked stale connector authorization after public endpoint changed (${count})`);
+  };
+
   const startTunnel = (): Promise<string> => {
     if (tunnelStartPromise) return tunnelStartPromise;
     tunnelStartPromise = (async () => {
@@ -120,6 +130,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       if (status.running && status.url) {
         const health = await probeBridgeHealth(status.url, workspace.id, 8000, instanceId);
         if (health) {
+          revokeStaleAuthorizationFor(status.url);
           publicBaseUrl = status.url;
           persistRuntime();
           return status.url;
@@ -130,6 +141,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       }
       const url = await tunnel.start(port);
       if (!closed) {
+        revokeStaleAuthorizationFor(url);
         publicBaseUrl = url;
         tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
         persistRuntime();
