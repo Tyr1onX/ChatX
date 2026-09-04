@@ -523,6 +523,10 @@ program
         const nextMcp = mcpUrlFromPublic(currentUrl);
         const decision = connectorRepairDecision(lastEndpoint?.mcpUrl, nextMcp, hasAuthorization);
         const action = decision.action;
+        if (decision.reason === "address_reclaimed" && hasAuthorization) {
+          await adminFetch(runtime, "POST", "/admin/revoke-all");
+          results.push("已清理旧连接授权");
+        }
         const boundName = nextMcp
           ? persistWorkspaceEndpoint({
               workspaceId: info.workspaceId,
