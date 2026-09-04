@@ -19,6 +19,7 @@ import type { Logger } from "../logger/index.js";
 import { PRODUCT_NAME, VERSION } from "../version.js";
 import type { BrowserController } from "../browser/controller.js";
 import { ProcessSessionError, type ProcessSessionManager } from "../process/session-manager.js";
+import { buildCompatibleProcessEnvironment } from "../process/compatible-environment.js";
 import { prepareSpawnCommand } from "../process/spawn-command.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -353,7 +354,12 @@ export function createMcpServer(ctx: McpContext): McpServer {
         const cwd = workspace.resolve(args.cwd);
         const prepared = prepareSpawnCommand(args.command, args.args);
         const result = await new Promise<{ exitCode: number | null; signal: string | null; stdout: string; stderr: string }>((resolve, reject) => {
-          const child = spawn(prepared.command, prepared.args, { cwd: cwd.abs, windowsHide: true, shell: false });
+          const child = spawn(prepared.command, prepared.args, {
+            cwd: cwd.abs,
+            env: buildCompatibleProcessEnvironment(),
+            windowsHide: true,
+            shell: false,
+          });
           let stdout = "";
           let stderr = "";
           const append = (current: string, chunk: Buffer | string): string => {
