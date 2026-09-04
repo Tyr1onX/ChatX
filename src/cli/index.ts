@@ -175,6 +175,8 @@ program
   .version(VERSION, "-v, --version")
   .configureHelp({ sortSubcommands: true });
 
+// ---------------------------------------------------------------- serve (internal)
+
 program
   .command("serve", { hidden: true })
   .description("Run the bridge in the foreground (internal)")
@@ -194,6 +196,8 @@ program
     process.on("SIGTERM", shutdown);
     say(`bridge ready on ${bridge.localBaseUrl()} (workspace ${bridge.workspace.name})`);
   });
+
+// ---------------------------------------------------------------- start
 
 program
   .command("start")
@@ -225,6 +229,8 @@ program
       handleCliError(error, opts.json);
     }
   });
+
+// ---------------------------------------------------------------- setup
 
 program
   .command("setup")
@@ -294,6 +300,8 @@ program
     }
   });
 
+// ---------------------------------------------------------------- stop / restart
+
 program
   .command("stop")
   .description("Stop the bridge for this workspace")
@@ -322,6 +330,8 @@ program
     }
   });
 
+// ---------------------------------------------------------------- status
+
 program
   .command("status")
   .description("Show bridge status for this workspace")
@@ -349,6 +359,8 @@ program
     else say("· 安全连接：未启用（本地模式）");
     say(`· 已授权连接：${info.tokenCount > 0 ? "是" : "否"}`);
   });
+
+// ---------------------------------------------------------------- doctor
 
 program
   .command("doctor")
@@ -491,10 +503,6 @@ program
           if (!binaries.cloudflared) {
             report.tunnel = { ok: false, detail: "NEED_CLOUDFLARED" };
           } else {
-            if (currentUrl && !healthy && info.tunnel.running) {
-              await adminFetch(runtime, "POST", "/admin/tunnel/stop", 30_000);
-              info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
-            }
             const started = await adminFetch<TunnelStartResponse>(runtime, "POST", "/admin/tunnel/start", 90_000);
             if (started.url) {
               const previousUrl = lastEndpoint?.publicUrl;
@@ -645,25 +653,26 @@ program
     if (!allOk || namedRepair.needed) process.exitCode = 1;
   });
 
-const pairCommand = program
+// ---------------------------------------------------------------- pair / unpair
+
+program
   .command("pair")
   .description("Generate a fresh pairing code")
   .option("-w, --workspace <path>")
-  .option("--json", "machine-readable output", false);
-
-pairCommand.action(async (opts: { workspace?: string; json: boolean }) => {
-  try {
-    const { runtime } = await ensureBridge(resolveWorkspace(opts.workspace));
-    const pairing = await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
-    if (opts.json) say(JSON.stringify({ ok: true, pairingCode: pairing.code, expiresAt: pairing.expiresAt }));
-    else {
-      say(`配对码：${pairing.code}`);
-      say(`（${Math.round((pairing.expiresAt - Date.now()) / 60000)} 分钟内有效，仅可使用一次）`);
+  .option("--json", "machine-readable output", false)
+  .action(async (opts: { workspace?: string; json: boolean }) => {
+    try {
+      const { runtime } = await ensureBridge(resolveWorkspace(opts.workspace));
+      const pairing = await adminFetch<PairingResponse>(runtime, "POST", "/admin/pairing");
+      if (opts.json) say(JSON.stringify({ ok: true, pairingCode: pairing.code, expiresAt: pairing.expiresAt }));
+      else {
+        say(`配对码：${pairing.code}`);
+        say(`（${Math.round((pairing.expiresAt - Date.now()) / 60000)} 分钟内有效，仅可使用一次）`);
+      }
+    } catch (error) {
+      handleCliError(error, opts.json);
     }
-  } catch (error) {
-    handleCliError(error, opts.json);
-  }
-});
+  });
 
 program
   .command("unpair")
@@ -673,10 +682,15 @@ program
     const root = resolveWorkspace(opts.workspace);
     const workspace = new Workspace(root);
     const runtime = await findLiveBridge(workspace.id);
-    if (runtime) await adminFetch(runtime, "POST", "/admin/revoke-all");
-    else new AuthStore(workspace.id).revokeAll();
+    if (runtime) {
+      await adminFetch(runtime, "POST", "/admin/revoke-all");
+    } else {
+      new AuthStore(workspace.id).revokeAll();
+    }
     check("已断开 ChatGPT 对当前项目的访问（所有令牌已吊销）");
   });
+
+// ---------------------------------------------------------------- logs / workspace / record
 
 program
   .command("logs")
@@ -718,6 +732,8 @@ program
     }
   });
 
+// ---------------------------------------------------------------- sandbox-allow (Codex writable_roots, macOS + Windows)
+
 program
   .command("sandbox-allow")
   .description("Add the local settings directory to the Codex sandbox allowlist")
@@ -737,6 +753,8 @@ program
     if (result.alreadyAllowed) check("沙箱白名单已就绪，后续对话无需再提权");
     else check("已将本地设置目录加入 Codex 沙箱白名单（后续对话无需再提权）");
   });
+
+// ---------------------------------------------------------------- update-check (once per local day)
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -796,6 +814,8 @@ program
     emit({ checked: true, updateAvailable, localCommit: local.stdout, remoteCommit });
   });
 
+// ---------------------------------------------------------------- session (ChatGPT conversation / Project memory)
+
 const session = program
   .command("session")
   .description("Remember the ChatGPT Project and conversation for this workspace");
@@ -810,8 +830,9 @@ session
     const saved = readSession(workspace.id);
     const conversation = resolveConversation(saved);
     if (opts.json) say(JSON.stringify({ ok: true, session: saved, conversation }));
-    else if (!saved) say("尚未记录 ChatGPT 会话。新仓库默认使用 Project 合集。");
-    else {
+    else if (!saved) {
+      say("尚未记录 ChatGPT 会话。新仓库默认使用 Project 合集。");
+    } else {
       say(`模式：${conversation.mode === "project" ? "Project 合集" : "长对话"}`);
       if (conversation.projectUrl) say(`合集：${conversation.projectUrl}`);
       if (saved.title) say(`会话：${saved.title}`);
@@ -833,34 +854,41 @@ session
   .option("--mode <mode>", "long-chat or project")
   .option("--project-url <url>", "ChatGPT Project collection URL (…/g/g-p-…/project)")
   .option("--connector-name <name>", "exact connector title for this workspace")
-  .action((opts: {
-    workspace?: string;
-    url?: string;
-    title?: string;
-    task?: string;
-    iteration?: string;
-    state?: string;
-    mode?: string;
-    projectUrl?: string;
-    connectorName?: string;
-  }) => {
-    const workspace = new Workspace(resolveWorkspace(opts.workspace));
-    const modeRaw = opts.mode?.trim().toLowerCase();
-    if (modeRaw && modeRaw !== "long-chat" && modeRaw !== "project") throw new Error("mode must be long-chat or project");
-    const saved = mergeSession(readSession(workspace.id), {
-      url: opts.url,
-      title: opts.title,
-      taskId: opts.task,
-      iteration: opts.iteration ? parseInt(opts.iteration, 10) : undefined,
-      lastState: opts.state,
-      conversationMode: modeRaw as ConversationMode | undefined,
-      projectUrl: opts.projectUrl,
-      connectorName: opts.connectorName,
-    });
-    writeSession(workspace.id, saved);
-    if (saved.projectUrl && saved.conversationMode === "project") check("已记录 ChatGPT 合集，后续从合集页新开或复用对话");
-    else check("已记录 ChatGPT 会话，后续任务将复用");
-  });
+  .action(
+    (opts: {
+      workspace?: string;
+      url?: string;
+      title?: string;
+      task?: string;
+      iteration?: string;
+      state?: string;
+      mode?: string;
+      projectUrl?: string;
+      connectorName?: string;
+    }) => {
+      const workspace = new Workspace(resolveWorkspace(opts.workspace));
+      const modeRaw = opts.mode?.trim().toLowerCase();
+      if (modeRaw && modeRaw !== "long-chat" && modeRaw !== "project") {
+        throw new Error("mode must be long-chat or project");
+      }
+      const saved = mergeSession(readSession(workspace.id), {
+        url: opts.url,
+        title: opts.title,
+        taskId: opts.task,
+        iteration: opts.iteration ? parseInt(opts.iteration, 10) : undefined,
+        lastState: opts.state,
+        conversationMode: modeRaw as ConversationMode | undefined,
+        projectUrl: opts.projectUrl,
+        connectorName: opts.connectorName,
+      });
+      writeSession(workspace.id, saved);
+      if (saved.projectUrl && saved.conversationMode === "project") {
+        check("已记录 ChatGPT 合集，后续从合集页新开或复用对话");
+      } else {
+        check("已记录 ChatGPT 会话，后续任务将复用");
+      }
+    }
+  );
 
 session
   .command("clear")
@@ -884,30 +912,32 @@ program
   .option("--tests <summary>", "e.g. '27 passed'")
   .option("--exit-status <status>", "ok | failed | blocked", "ok")
   .option("--notes <text>")
-  .action((opts: {
-    workspace?: string;
-    task: string;
-    iteration: string;
-    changedFiles: string;
-    tests?: string;
-    exitStatus: string;
-    notes?: string;
-  }) => {
-    const workspace = new Workspace(resolveWorkspace(opts.workspace));
-    const changed = /^\d+$/.test(opts.changedFiles)
-      ? parseInt(opts.changedFiles, 10)
-      : opts.changedFiles.split(",").map((file) => file.trim()).filter(Boolean);
-    appendExecutionRecord(workspace.id, {
-      taskId: opts.task,
-      iteration: parseInt(opts.iteration, 10),
-      changedFiles: changed,
-      tests: opts.tests ?? null,
-      exitStatus: opts.exitStatus,
-      timestamp: new Date().toISOString(),
-      notes: opts.notes,
-    });
-    check("已记录执行摘要");
-  });
+  .action(
+    (opts: {
+      workspace?: string;
+      task: string;
+      iteration: string;
+      changedFiles: string;
+      tests?: string;
+      exitStatus: string;
+      notes?: string;
+    }) => {
+      const workspace = new Workspace(resolveWorkspace(opts.workspace));
+      const changed = /^\d+$/.test(opts.changedFiles)
+        ? parseInt(opts.changedFiles, 10)
+        : opts.changedFiles.split(",").map((file) => file.trim()).filter(Boolean);
+      appendExecutionRecord(workspace.id, {
+        taskId: opts.task,
+        iteration: parseInt(opts.iteration, 10),
+        changedFiles: changed,
+        tests: opts.tests ?? null,
+        exitStatus: opts.exitStatus,
+        timestamp: new Date().toISOString(),
+        notes: opts.notes,
+      });
+      check("已记录执行摘要");
+    }
+  );
 
 const tunnelCmd = program.command("tunnel").description("Choose or inspect the public connection for this workspace");
 
@@ -921,8 +951,11 @@ tunnelCmd
     try {
       const workspace = new Workspace(resolveWorkspace(opts.workspace));
       const payload = tunnelChoicePayload(workspace, opts.zone);
-      if (opts.json) say(JSON.stringify(payload));
-      else if (payload.needsChoice) say(TUNNEL_CHOICE_PROMPT);
+      if (opts.json) {
+        say(JSON.stringify(payload));
+        return;
+      }
+      if (payload.needsChoice) say(TUNNEL_CHOICE_PROMPT);
       else if (payload.namedReady) check(`固定域名：${payload.hostname}`);
       else say("当前使用临时地址。");
     } catch (error) {
@@ -954,7 +987,9 @@ tunnelCmd
         else check("已选用临时地址");
         return;
       }
-      if (mode !== "named") throw new Error("mode must be quick or named");
+      if (mode !== "named") {
+        throw new Error("mode must be quick or named");
+      }
       const zone = parseZoneInput(opts.zone ?? "");
       if (!zone) {
         const payload = {
@@ -963,8 +998,11 @@ tunnelCmd
           userMessage: "请告诉我已经加在 Cloudflare 上的域名，例如 example.com",
           loginPrompt: NAMED_LOGIN_PROMPT,
         };
-        if (opts.json) say(JSON.stringify(payload));
-        else say(payload.userMessage);
+        if (opts.json) {
+          say(JSON.stringify(payload));
+          return;
+        }
+        say(payload.userMessage);
         return;
       }
       if (!opts.json) say(NAMED_LOGIN_PROMPT);
@@ -983,8 +1021,11 @@ tunnelCmd
         error: result.error,
         state: result.state,
       };
-      if (opts.json) say(JSON.stringify(payload));
-      else if (result.fallback) say(result.userMessage ?? "");
+      if (opts.json) {
+        say(JSON.stringify(payload));
+        return;
+      }
+      if (result.fallback) say(result.userMessage ?? "");
       else check(`固定域名已就绪：${result.state.hostname}`);
     } catch (error) {
       handleCliError(error, opts.json);
@@ -1010,14 +1051,17 @@ tunnelCmd
 
 function handleCliError(error: unknown, json: boolean): void {
   const message = error instanceof Error ? error.message : String(error);
-  if (json) say(JSON.stringify({ ok: false, error: message }));
-  else if (message.startsWith("NEED_CLOUDFLARED")) {
+  if (json) {
+    say(JSON.stringify({ ok: false, error: message }));
+  } else if (message.startsWith("NEED_CLOUDFLARED")) {
     say("需要你完成一步：");
     say("");
     say("尚未安装安全连接组件 cloudflared。");
     say("macOS 用户可运行：brew install cloudflared");
     say("完成后再试一次即可。");
-  } else cross(message);
+  } else {
+    cross(message);
+  }
   process.exitCode = 1;
 }
 
