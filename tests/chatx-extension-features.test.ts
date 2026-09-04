@@ -159,6 +159,74 @@ describe("ChatX unified browser extension", () => {
     expect(writes.every((write) => Object.keys(write).length === 1 && "features" in write)).toBe(true);
   });
 
+  it("keeps true-to-false transitions persisted for all three top-level features", async () => {
+    const values = new Map<string, unknown>([["features", {
+      watcher: true,
+      sessionGuard: true,
+      agentBridge: true,
+    }]]);
+    const chrome = {
+      storage: {
+        local: {
+          async get(key: string) {
+            return { [key]: values.get(key) };
+          },
+          async set(next: Record<string, unknown>) {
+            for (const [key, value] of Object.entries(next)) values.set(key, value);
+          },
+        },
+      },
+    };
+    const context: Record<string, unknown> = { chrome };
+    context.globalThis = context;
+    vm.runInNewContext(read("src/features.js"), context);
+    const features = context.ChatXFeatures as {
+      get(): Promise<Record<string, boolean>>;
+      set(name: string, enabled: boolean): Promise<Record<string, boolean>>;
+    };
+
+    for (const name of ["watcher", "sessionGuard", "agentBridge"]) {
+      await features.set(name, true);
+      const disabled = await features.set(name, false);
+      expect(disabled[name]).toBe(false);
+      expect((values.get("features") as Record<string, boolean>)[name]).toBe(false);
+    }
+
+    expect(JSON.parse(JSON.stringify(await features.get()))).toEqual({
+      watcher: false,
+      sessionGuard: false,
+      agentBridge: false,
+    });
+  });
+
+  it("registers feature messaging synchronously and keeps storage-driven UI off", () => {
+    const background = read("src/background.js");
+    const popup = read("popup.js");
+    const floating = read("src/floating-ui.js");
+
+    expect(background).not.toContain("await Features.ensure()");
+    const readyIndex = background.indexOf("const featuresReady = Features.ensure()");
+    const listenerIndex = background.indexOf("chrome.runtime.onMessage.addListener");
+    const awaitReadyIndex = background.indexOf("await featuresReady", listenerIndex);
+    expect(readyIndex).toBeGreaterThanOrEqual(0);
+    expect(listenerIndex).toBeGreaterThan(readyIndex);
+    expect(awaitReadyIndex).toBeGreaterThan(listenerIndex);
+
+    for (const source of [popup, floating]) {
+      expect(source).toContain('$("watcherToggle").checked = features.watcher');
+      expect(source).toContain('$("sessionGuardToggle").checked = features.sessionGuard');
+      expect(source).toContain('$("agentBridgeToggle").checked = features.agentBridge');
+      const storageStart = source.indexOf("chrome.storage.onChanged.addListener");
+      expect(storageStart).toBeGreaterThan(0);
+      const storageBlock = source.slice(storageStart);
+      expect(storageBlock).toContain("features = Features.normalize(changes[Features.KEY].newValue)");
+      expect(storageBlock).toContain("renderFeatures()");
+      expect(storageBlock).not.toContain("Features.set(");
+      expect(storageBlock).not.toContain("Ui.setFeature(");
+      expect(storageBlock).not.toContain("chrome.storage.local.set(");
+    }
+  });
+
   it("gates Watcher execution and removes its legacy enable state", () => {
     const background = read("src/watcher/background.js");
     const content = read("src/watcher/content.js");
@@ -171,6 +239,8 @@ describe("ChatX unified browser extension", () => {
     expect(background).toContain("if (!task) return false");
     expect(content).toContain("ChatXFeatures.get()");
     expect(content).toContain("detachObservers()");
+    expect(content).toContain("setEnabled(next.watcher)");
+    expect(content).toMatch(/function setEnabled\(next\) \{[\s\S]*?else \{\r?\n      detachObservers\(\);/);
     expect(overlay).toContain("ChatXFeatures.get()");
     expect(overlay).toContain("if (!next.watcher) removeOverlay()");
   });
@@ -179,6 +249,7 @@ describe("ChatX unified browser extension", () => {
     const content = read("src/session-guard/content.js");
 
     expect(content).toContain("sessionGuardEnabled = (await globalThis.ChatXFeatures.get()).sessionGuard");
+    expect(content).toContain("sessionGuardEnabled = globalThis.ChatXFeatures.normalize(changes[globalThis.ChatXFeatures.KEY].newValue).sessionGuard");
     expect(content).toContain("enabled: sessionGuardEnabled");
     expect(content).toContain("controller?.updateConfig(runtime)");
     expect(content).toContain("SESSION_GUARD_DISABLED");
@@ -205,6 +276,12 @@ describe("ChatX unified browser extension", () => {
     expect(background).not.toContain("chrome.action.onClicked");
     expect(background).toContain("stopForFeatureDisable: stopUser");
     expect(rootBackground).toContain("await globalThis.ChatXAgentBridge?.stopForFeatureDisable?.()");
+    const rootSetIndex = rootBackground.indexOf("const features = await Features.set(message.feature, message.enabled)");
+    const rootStopIndex = rootBackground.indexOf("await globalThis.ChatXAgentBridge?.stopForFeatureDisable?.()");
+    const rootResponseIndex = rootBackground.indexOf("sendResponse({ ok: true, features })", rootStopIndex);
+    expect(rootSetIndex).toBeGreaterThan(0);
+    expect(rootStopIndex).toBeGreaterThan(rootSetIndex);
+    expect(rootResponseIndex).toBeGreaterThan(rootStopIndex);
     expect(background).toMatch(/async function restoreRolloverSafely\(state\) \{\r?\n  if \(!\(await isFeatureEnabled\(\)\)\) return/);
 
     const stopStart = background.indexOf("async function stopUser()");
@@ -216,6 +293,14 @@ describe("ChatX unified browser extension", () => {
     expect(stopBlock).not.toContain("latestDeveloperHandoff: null");
     expect(stopBlock).not.toContain("latestAuditorVerdict: null");
     expect(stopBlock).not.toContain("checkpoint: null");
+
+    for (const functionName of ["onTurnSent", "onTurnComplete", "onTurnFailed", "resumeRollover"]) {
+      const functionStart = background.indexOf(`async function ${functionName}`);
+      const featureGuard = background.indexOf("if (!(await isFeatureEnabled())) return;", functionStart);
+      expect(functionStart).toBeGreaterThan(0);
+      expect(featureGuard).toBeGreaterThan(functionStart);
+      expect(featureGuard - functionStart).toBeLessThan(160);
+    }
 
     const clickIndex = content.indexOf("sendButton.click()");
     const guardIndex = content.lastIndexOf("await assertFeatureEnabled()", clickIndex);

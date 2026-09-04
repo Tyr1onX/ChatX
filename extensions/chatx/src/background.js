@@ -4,8 +4,7 @@ import "./session-guard/background.js";
 import "./agent-bridge/background.js";
 
 const Features = globalThis.ChatXFeatures;
-
-await Features.ensure();
+const featuresReady = Features.ensure();
 
 function isUiSender(sender) {
   if (sender.id !== chrome.runtime.id) return false;
@@ -29,6 +28,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   void (async () => {
     try {
+      await featuresReady;
       if (message.type === "CHATX_GET_FEATURES") {
         sendResponse({ ok: true, features: await Features.get() });
         return;
