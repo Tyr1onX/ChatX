@@ -11,59 +11,65 @@
     <header class="brand-header">
       <img src="icons/icon32.png" alt="" aria-hidden="true">
       <h1>ChatX</h1>
+      <div class="language-switch" aria-label="Language">
+        <button type="button" data-language="zh-CN" aria-pressed="true">中文</button>
+        <span>/</span>
+        <button type="button" data-language="en" aria-pressed="false">EN</button>
+      </div>
     </header>
 
     <label class="feature-row">
-      <span><strong>Watcher</strong><small>后台任务完成提醒</small></span>
+      <span><strong data-i18n="watcher">任务监听</strong><small data-i18n="watcherDescription">后台任务完成提醒</small></span>
       <input id="watcherToggle" type="checkbox">
     </label>
 
     <label class="feature-row">
-      <span><strong>Session Guard</strong><small>长会话性能保护</small></span>
+      <span><strong data-i18n="sessionGuard">会话保护</strong><small data-i18n="sessionGuardDescription">长会话性能保护</small></span>
       <input id="sessionGuardToggle" type="checkbox">
     </label>
 
     <label class="feature-row">
-      <span><strong>Agent Bridge</strong><small>Developer / Auditor 自动协作</small></span>
+      <span><strong data-i18n="agentBridge">Agent Bridge / 智能协作</strong><small data-i18n="agentBridgeDescription">开发者 / 审计者自动协作</small></span>
       <input id="agentBridgeToggle" type="checkbox">
     </label>
 
     <section id="agentBridgeControls" hidden>
       <div class="agents">
-        <div>Developer: <strong id="developerState">missing</strong></div>
-        <div>Auditor: <strong id="auditorState">missing</strong></div>
+        <div><span data-i18n="developer">开发者</span>: <strong id="developerState">未指定</strong></div>
+        <div><span data-i18n="auditor">审计者</span>: <strong id="auditorState">未指定</strong></div>
       </div>
 
-      <label for="task">Task</label>
+      <label for="task" data-i18n="task">任务</label>
       <textarea id="task" rows="4" required></textarea>
 
       <div class="budget-grid">
-        <label for="maxRounds">Max rounds
+        <label for="maxRounds"><span data-i18n="maxRounds">最大轮数</span>
           <input id="maxRounds" type="number" min="1" step="1" value="6">
         </label>
-        <label for="maxGenerations">Max generations
+        <label for="maxGenerations"><span data-i18n="maxGenerations">最大代数</span>
           <input id="maxGenerations" type="number" min="1" step="1" value="3">
         </label>
       </div>
 
       <div class="button-grid">
-        <button id="assignDeveloper" type="button">Assign Developer</button>
-        <button id="assignAuditor" type="button">Assign Auditor</button>
-        <button id="start" type="button">Start</button>
-        <button id="stop" type="button">Stop</button>
+        <button id="assignDeveloper" type="button" data-i18n="assignDeveloper">指定开发者</button>
+        <button id="assignAuditor" type="button" data-i18n="assignAuditor">指定审计者</button>
+        <button id="start" type="button" data-i18n="start">开始</button>
+        <button id="stop" type="button" data-i18n="stop">停止</button>
       </div>
 
       <div class="runtime" aria-live="polite">
-        <div>status <strong id="status">IDLE</strong></div>
-        <div>generation <strong id="generation">1</strong></div>
-        <div>round <strong id="round">0</strong></div>
-        <div id="errorRow" hidden>error <strong id="error"></strong></div>
+        <div><span data-i18n="status">状态</span> <strong id="status">空闲</strong></div>
+        <div><span data-i18n="generation">第几代</span> <strong id="generation">1</strong></div>
+        <div><span data-i18n="round">第几轮</span> <strong id="round">0</strong></div>
+        <div id="errorRow" hidden><span data-i18n="error">错误</span> <strong id="error"></strong></div>
       </div>
 
       <p id="notice" role="status" aria-live="polite" hidden></p>
     </section>
   </main>
   <script src="src/features.js"></script>
+  <script src="src/ui-prefs.js"></script>
   <script src="src/ui-api.js"></script>
   <script src="popup.js"></script>
 </body>
