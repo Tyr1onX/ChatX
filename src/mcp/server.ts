@@ -16,7 +16,7 @@ import { gitDiff, gitInfo, gitStatus, type DiffMode } from "../workspace/git.js"
 import { gitLog, gitShow, GitHistoryError } from "../workspace/git-history.js";
 import { latestExecutionRecord, readExecutionRecords } from "../execution/records.js";
 import type { Logger } from "../logger/index.js";
-import { PRODUCT_NAME, VERSION } from "../version.js";
+import { PRODUCT_NAME, TOOLSET_VERSION, VERSION } from "../version.js";
 import type { BrowserController } from "../browser/controller.js";
 import { ProcessSessionError, type ProcessSessionManager } from "../process/session-manager.js";
 import { prepareSpawnCommand } from "../process/spawn-command.js";
@@ -112,6 +112,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
         return ok({
           workspaceId: workspace.id,
           workspaceName: workspace.name,
+          toolsetVersion: TOOLSET_VERSION,
           rootAlias: "workspace:/",
           ...project,
           git: {

@@ -262,7 +262,7 @@ export class AuthStore {
     return true;
   }
 
-  /** Used by `c2c unpair`: revoke everything for this workspace. */
+  /** Used by `chatx unpair`: revoke everything for this workspace. */
   revokeAll(): number {
     const count = this.tokens.size;
     this.tokens.clear();

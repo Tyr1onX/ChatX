@@ -48,7 +48,7 @@ const registration = await (
   await fetch(asMeta.registration_endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_name: "C2C PoC Client", redirect_uris: [REDIRECT_URI] }),
+    body: JSON.stringify({ client_name: "ChatX PoC Client", redirect_uris: [REDIRECT_URI] }),
   })
 ).json();
 console.log(`   client_id: ${registration.client_id}`);
@@ -106,7 +106,7 @@ if (!tokens.access_token) process.exit(2);
 
 // 6. MCP calls
 step("6. MCP tool calls");
-const client = new Client({ name: "c2c-poc", version: "1.0.0" });
+const client = new Client({ name: "chatx-poc", version: "1.0.0" });
 await client.connect(
   new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
     requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } },

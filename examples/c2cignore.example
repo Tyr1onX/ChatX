@@ -1,9 +1,0 @@
-# .c2cignore — gitignore syntax; these paths become invisible to ChatGPT.
-# Sensitive defaults (.env, keys, credentials, SSH…) are always enforced
-# even without this file.
-
-# internal design docs
-internal-notes/
-
-# large generated fixtures
-fixtures/**/*.snap

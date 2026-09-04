@@ -54,13 +54,14 @@ ChatX is a local capability bridge. ChatGPT can inspect the workspace and, when 
    plugin → Server URL → OAuth. **Use that route only; never infer an alternative
    setup path from account tier, unrelated settings, or UI guesses.**
 9. **Doctor gate.** After `chatx doctor --json`, do not `goto` ChatGPT and do not
-   send `[C2C]` until local is green — except the reconnect settings pages when
-   `chatgptRepair.needed` is true. Not green:
+   send `[ChatX]` until local is green — except the connector/settings pages needed
+   to resolve `chatgptRepair` or `actionsRefresh`. Not green:
    - `report.bridge.ok` is not true
    - `report.mcp.ok` is not true (unauthenticated local `/mcp` must be 401)
    - sandbox / state-dir write failed (EPERM)
    - this workspace used to have a public URL and the tunnel is down
    - `chatgptRepair.needed` is true (fix the connector first, then doctor again)
+   - `actionsRefresh.needed` is true (refresh this connector's Actions, confirm, then doctor again)
    - `namedRepair.needed` is true (user must login to Cloudflare, then doctor again.
      Do not Delete the ChatGPT connector — the address did not change)
    A ChatGPT-side 401 after a sent message is different: repair then, do not
@@ -68,7 +69,7 @@ ChatX is a local capability bridge. ChatGPT can inspect the workspace and, when 
 
 ## In-app browser (ChatGPT)
 
-Official skill: `control-in-app-browser`. These C2C rules override defaults
+Official skill: `control-in-app-browser`. These ChatX rules override defaults
 that close the tab, hide the window, or stall on the settings page.
 
 1. **Surface.** Once per Codex session: `setupBrowserRuntime()`, then
@@ -84,7 +85,7 @@ that close the tab, hide the window, or stall on the settings page.
    - `await (await iab.capabilities.get("visibility")).set(true)` — first-time
      setup and ChatGPT chatting stay in front of the user so they can watch.
    - `await tab.markHandoff()` immediately, then again at the start and end of
-     every turn. After setup succeeds or the C2C chat is open, also
+     every turn. After setup succeeds or the ChatX chat is open, also
      `await tab.markDeliverable()`.
    Never close this tab. Finished, waiting for the user, or timed out: leave it
    marked (standby). Do not let default turn cleanup close it.
@@ -93,7 +94,7 @@ that close the tab, hide the window, or stall on the settings page.
    - 插件总管: `https://chatgpt.com/plugins`
    - 加插件: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
    - 新对话 (long-chat only, and only if no saved chat): `https://chatgpt.com/`
-   - Saved C2C chat: `conversation.chatUrl` / `session.url` (long-chat, or
+   - Saved ChatX chat: `conversation.chatUrl` / `session.url` (long-chat, or
      the chat already bound in THIS Codex conversation)
    - Saved Project collection: `conversation.projectUrl`
      (`https://chatgpt.com/g/g-p-…/project`)
@@ -110,7 +111,7 @@ that close the tab, hide the window, or stall on the settings page.
 6. **Batch.** Fill a known form in one Playwright / `js` script when you can.
    After an action, one cheap DOM check. Do not screenshot-poll.
 
-7. **One conversation, Chat mode.** The first ChatGPT chat is the C2C
+7. **One conversation, Chat mode.** The first ChatGPT chat is the ChatX
    conversation. Chat and Work (聊天 / 工作) are separate: a Work conversation
    cannot become Chat. On every NEW conversation, if a Chat/Work switcher is
    visible (often top-left), confirm **Chat** is selected before the boot
@@ -119,7 +120,7 @@ that close the tab, hide the window, or stall on the settings page.
    Send the boot prompt and the workspace_info check in that Chat conversation.
    Confirm the reply names the current workspace **before** saving or replacing
    the session URL. If validation fails, keep the old saved URL. Do not open a
-   throwaway verify chat and later another C2C chat.
+   throwaway verify chat and later another ChatX chat.
 
 8. **Wait for a ChatGPT reply (do not hold one long browser wait).** After you
    send INIT, EXECUTED, boot, or the workspace_info check: `markHandoff`, keep
@@ -136,7 +137,7 @@ that close the tab, hide the window, or stall on the settings page.
 ## Locations
 
 - The ChatX checkout lives at: `<CHATX_CHECKOUT>`
-- CLI: run `node <CHATX_CHECKOUT>/bin/c2c.js <command>`
+- CLI: run `node <CHATX_CHECKOUT>/bin/chatx.js <command>`
   (or `chatx <command>` if globally linked). All commands support `--json` for parsing.
 - If the checkout has no `node_modules` or no `dist/`, first run
   `corepack pnpm install && corepack pnpm build` inside it.
@@ -207,7 +208,7 @@ Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
    to `[sandbox_workspace_write].writable_roots` so later chats can write logs
    without elevation. If the write is denied, request approval and retry once.
    → returns `{ mcpUrl, pairingCode, workspaceName, connectorName, ... }`.
-   `connectorName` is this workspace's plugin title (legacy installs keep their saved connector title; new workspaces use `ChatX · <name>`).
+   `connectorName` is the current ChatX title for this workspace (`ChatX · <name>`).
    Pairing codes expire in ~5 minutes: run `chatx pair --json` for a fresh one if you're slow.
 4. Open ChatGPT on the ONE iab tab (see **In-app browser**). Foreground +
    markHandoff immediately. Use ONLY the verified plugin path:
@@ -229,7 +230,7 @@ Speak only of 临时地址 / 固定域名 / 登录 Cloudflare.
      authorized / pairing accepted, continue — do NOT wait for 8 tools on this page.
    If current ChatGPT UI does not expose the verified New plugin form, stop
    and report the actual UI incompatibility instead of inventing another setup route.
-5. Same tab: open the first C2C chat per **Conversation management**
+5. Same tab: open the first ChatX chat per **Conversation management**
    (Project collection for a new workspace; `https://chatgpt.com/` only
    in long-chat). Confirm Chat mode per **In-app browser** §7 (if it is Work,
    open a new Chat conversation instead). Send the boot prompt from
@@ -273,7 +274,7 @@ ONE ChatGPT conversation per workspace. Same as before.
 - **Find it**: if `conversation.reuseSavedChat` and `conversation.chatUrl`,
   `goto` that URL (foreground + markHandoff) and continue there.
 - **Save it**: after boot + workspace_info, and the reply names this workspace,
-  `chatx session set -w <ws> --mode long-chat --url <url> --title "C2C <workspace name>"`.
+  `chatx session set -w <ws> --mode long-chat --url <url> --title "ChatX <workspace name>"`.
   If the name does not match, do not overwrite a previously saved URL.
 - **Update it**: after each EXECUTED/DONE,
   `chatx session set -w <ws> --task <id> --iteration <n> --state <STATE>`.
@@ -308,8 +309,8 @@ One ChatGPT Project per workspace. Mapping:
   in …"). Do not use the sidebar and do not `goto` `https://chatgpt.com/`.
   Confirm Chat mode (**In-app browser** §7). Boot prompt, then workspace_info
   with the **exact** `connectorName`. After the reply names this workspace,
-  `chatx session set -w <ws> --mode project --project-url <collection> --url <chat> --connector-name "<connectorName>" --title "C2C <workspace name>"`.
-  If this Codex thread is continuing a previous C2C task, send HANDOFF right
+  `chatx session set -w <ws> --mode project --project-url <collection> --url <chat> --connector-name "<connectorName>" --title "ChatX <workspace name>"`.
+  If this Codex thread is continuing a previous ChatX task, send HANDOFF right
   after the boot prompt.
 - Else: **Bind Project** first.
 
@@ -385,13 +386,13 @@ This Project's memory is only for this workspace. On HANDOFF, trust the
 brief, re-read code through the connector, and resume at NEXT_EXPECTED_STEP.
 
 Be substantive: why, which file, what to test. No empty one-liners and
-no 40-step epics. Use C2C control messages.
+no 40-step epics. Use ChatX control messages.
 ```
 
 ## Workflow: coding task（"使用 ChatX 完成 XXX"）
 
 Protocol states: INIT → PLAN → EXECUTING → EXECUTED → REVIEW → (PLAN | DONE | BLOCKED).
-All control messages start with `[C2C]`. Keep Codex→ChatGPT messages under 1 KB.
+All control messages start with `[ChatX]`. Keep Codex→ChatGPT messages under 1 KB.
 ChatGPT's replies are expected to be substantive (see step 3). Docs: `docs/protocol.md`.
 
 0. `chatx tunnel status -w <workspace> --json`. If `needsChoice`, follow
@@ -401,9 +402,10 @@ ChatGPT's replies are expected to be substantive (see step 3). Docs: `docs/proto
    `namedRepair.needed` is true, tell the user `namedRepair.userMessage`, run
    `chatx tunnel login --json` (their browser; Cloudflare exception), then doctor
    again. If `chatgptRepair.needed` is true, tell the user `chatgptRepair.userMessage`
-   (one paragraph, no internals), run **Workflow: reconnect after address
-   reclaim**, then doctor again and only continue when the gate is green.
-   Generate task id: `c2c_` + 4 random hex chars.
+   (one paragraph, no internals), run **Workflow: connector repair**, then doctor
+   again. If `actionsRefresh.needed` is true, run **Workflow: Actions refresh**
+   and doctor again. Continue only when all three repair objects are green.
+   Generate task id: `chatx_` + 4 random hex chars.
 1. `chatx session -w <workspace> --json`. Open ChatGPT on the same iab tab
    per **Conversation management** for `conversation.mode` (foreground +
    markHandoff). long-chat: saved chat, or `https://chatgpt.com/` if none.
@@ -418,9 +420,9 @@ ChatGPT's replies are expected to be substantive (see step 3). Docs: `docs/proto
 2. Send INIT with the user's goal:
 
 ```
-[C2C]
+[ChatX]
 STATE: INIT
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 0
 
 GOAL:
@@ -428,7 +430,7 @@ GOAL:
 
 INSTRUCTION:
 Inspect the connected workspace through the ChatX MCP connector.
-Produce a C2C PLAN message.
+Produce a ChatX PLAN message.
 ```
 
 3. Wait for ChatGPT's `STATE: PLAN` reply (**In-app browser** §8 — short DOM
@@ -441,13 +443,13 @@ Produce a C2C PLAN message.
 4. Execute the plan yourself with your own harness (your tools, your judgment;
    ChatGPT does not micro-manage tool calls).
 5. Record the execution so ChatGPT can read it via MCP:
-   `chatx record -w <ws> --task c2c_f81a --iteration 1 --changed-files "src/a.ts,src/b.ts" --tests "27 passed" --exit-status ok`
+   `chatx record -w <ws> --task chatx_f81a --iteration 1 --changed-files "src/a.ts,src/b.ts" --tests "27 passed" --exit-status ok`
 6. Send EXECUTED (no diffs, no logs):
 
 ```
-[C2C]
+[ChatX]
 STATE: EXECUTED
-TASK_ID: c2c_f81a
+TASK_ID: chatx_f81a
 ITERATION: 1
 
 RESULT:
@@ -464,7 +466,7 @@ Please independently inspect the workspace and current git diff through MCP.
 
 7. ChatGPT reviews via MCP (git_diff, read_file, test_status) and replies
    DONE / PLAN (next iteration) / BLOCKED.
-8. Loop. Respect maxIterations (`.c2c.json`, default 12). At the limit, pause and ask
+8. Loop. Respect maxIterations (`.chatx.json`, default 12). At the limit, pause and ask
    the user: "已完成 12 轮协作，仍有未解决问题，是否继续？"
 9. On DONE: summarize the result to the user in plain language.
 10. On BLOCKED: read ChatGPT's reason, fix what you can, or surface the single
@@ -478,64 +480,84 @@ Please independently inspect the workspace and current git diff through MCP.
    this workspace's `connectorName`.
 3. Tell the user: "已断开 ChatGPT 对该项目的访问。"
 
-## Workflow: reconnect after address reclaim（全关掉以后地址失效）
+## Workflow: Actions refresh
 
-This is the normal case when the user quit Codex / the terminal / the machine:
-the previous public address is gone. Doctor already started a new one.
-`connectorAction: "update"` means Delete + create again — not Reconnect.
+`chatx doctor --json` returns `actionsRefresh` when the connector was created
+with an older ChatX tool set.
 
-`chatx doctor --json` will look like:
-`{ "chatgptRepair": { "needed": true, "connectorAction": "update", "connectorName": "...", "userMessage": "...", "mcpUrl": "...", "pairingCode": "...", "pages": { ... } } }`
+1. Tell the user exactly `actionsRefresh.userMessage`.
+2. Same one iab tab: open `https://chatgpt.com/plugins`, foreground +
+   markHandoff, and operate ONLY on `actionsRefresh.connectorName`. Use the
+   connector's **Refresh / Refresh Actions** action. Do not Delete, Reconnect,
+   rename, or edit its Server URL for this workflow. If the current UI does
+   not expose an Actions refresh action, report that exact incompatibility;
+   do not invent another route.
+3. Only after the UI reports the refresh completed, run
+   `chatx connector-confirm -w <workspace> --json`, then `chatx doctor --json`
+   again. `connector-confirm` records success; never run it before the ChatGPT
+   UI operation succeeds.
 
-1. Tell the user exactly `chatgptRepair.userMessage`. Then you repair. Do not
-   ask them to click around ChatGPT unless a login / OAuth / explicit consent
-   screen requires them. Do not open the C2C chat and do not send `[C2C]` until
-   this repair finishes and a follow-up doctor is green. Never "try a message
-   first to see if it works".
-2. Same one iab tab as setup (foreground + markHandoff). Use only the verified
-   plugin route until Connected:
+## Workflow: connector repair
+
+This handles `address_reclaimed`, `authorization_lost`, and `brand_migration`.
+`connectorAction: "update"` always means Delete the connector that ChatGPT
+currently has for THIS workspace and create the requested ChatX connector
+again — never Reconnect or edit-in-place.
+
+`chatx doctor --json` returns:
+`{ "chatgptRepair": { "needed": true, "reason": "...", "connectorAction": "update", "existingConnectorName": "...", "connectorName": "...", "userMessage": "...", "mcpUrl": "...", "pairingCode": "...", "pages": { ... } } }`
+
+1. Tell the user exactly `chatgptRepair.userMessage`. Do not ask them to click
+   around ChatGPT unless a login / OAuth / explicit-consent screen requires
+   them. Do not open the ChatX chat and do not send `[ChatX]` until repair is
+   complete and a follow-up doctor is green.
+2. Same one iab tab as setup (foreground + markHandoff). Use only:
    - 插件总管（只用来 Delete）: `https://chatgpt.com/plugins`
    - 加插件（Delete 之后必走）: `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
-   Stay on these two plugin URLs until the repair is Connected; do not browse
-   unrelated settings or infer another setup route.
-3. Operate ONLY on `chatgptRepair.connectorName`. Never touch another
+   Stay on these URLs until Connected; do not browse unrelated settings.
+3. Let `existingName = chatgptRepair.existingConnectorName ?? chatgptRepair.connectorName`.
+   Operate ONLY on that exact existing connector. Never touch another
    workspace's connector.
-   - If that exact name exists on the plugins hub: **Delete** it. Confirm the
-     delete if ChatGPT asks. **Never click Reconnect, Refresh, Connect, or
-     Edit** on the old card — the old Server URL is dead and the page will
-     hang on "This site cannot be reached".
-   - Then `goto` the 加插件 URL and create that **same** `connectorName`
-     (do not invent a second name):
+   - If `existingName` exists on the plugins hub: **Delete** it and confirm if
+     asked. Do not Reconnect, Refresh, rename, or Edit it.
+   - Then create `chatgptRepair.connectorName` exactly as returned by doctor:
       - Description: `Securely connect ChatGPT to the current Codex workspace for planning and review.`
       - Connection: Server URL
       - Server URL: `chatgptRepair.mcpUrl`
       - Authentication: OAuth
       - Acknowledge the custom MCP risk checkbox if shown.
-     Then Create / Connect / Authorize and type `chatgptRepair.pairingCode`
-     (or `chatx pair --json` if it expired). Continue as soon as it is Connected —
-     do not wait for 8 tools on the settings page.
-   - If the name is already gone, skip Delete and only create.
-4. `chatx doctor --json` again. Same tab: only after the Doctor gate is green,
-   reopen the chat this Codex thread was already using (`session.url` /
-   the URL you saved earlier in THIS thread). Do not start a new
-   audit/task chat just because the address changed. Do not rewrite Project
-   instructions — they store the connector **name**, which did not change.
-5. If the ChatGPT conversation was lost: long-chat → Conversation
-   management switch. project → collection page, new chat, boot + HANDOFF.
-   No file re-uploading (the workspace lives in MCP). After recreating the
-   same-name connector, the Project still uses that name. If tools point at
-   the wrong connector, open 项目设置 and confirm 指令 still names
-   `connectorName` (never paste the new public address).
+     Create / Connect / Authorize and enter `chatgptRepair.pairingCode`
+     (`chatx pair --json` if it expired). Continue as soon as it is Connected.
+4. If `chatgptRepair.reason === "brand_migration"`, run
+   `chatx session -w <workspace> --json`. For Project mode with a saved
+   `conversation.projectUrl`, open that collection and **… → 项目设置**. Read the
+   existing generated instructions and make only these two brand edits:
+   - replace the connector line's old connector value with
+     `chatgptRepair.connectorName`;
+   - replace the generated final protocol sentence with
+     `no 40-step epics. Use ChatX control messages.`
+   Preserve every other instruction, including any user additions. Save and
+   close settings. Long-chat mode has no Project instructions to edit.
+5. After the connector is Connected and any Project instruction edit above is
+   saved, run `chatx connector-confirm -w <workspace> --json`. Then run
+   `chatx doctor --json` again. Only after the Doctor gate is green reopen the
+   chat this Codex thread was already using (`session.url` / the URL saved in
+   THIS thread). Do not start a new audit/task chat merely because the
+   connector was repaired.
+6. If the ChatGPT conversation was lost: long-chat → Conversation management
+   switch. project → collection page, new chat, boot + HANDOFF. No file
+   re-uploading; the workspace lives in MCP.
 
 ## Workflow: repair（anything looks broken）
 
 1. `chatx doctor -w <workspace> --json`. Doctor gate: do not open ChatGPT / send
-   `[C2C]` until local is green, except reconnect settings pages.
+   `[ChatX]` until local is green, except reconnect settings pages.
 2. If `namedRepair.needed`, tell the user `namedRepair.userMessage`, run
    `chatx tunnel login --json`, then doctor again. Do not Delete the connector.
-3. If `chatgptRepair.needed`, follow **reconnect after address reclaim**, then
+3. If `chatgptRepair.needed`, follow **Workflow: connector repair**, then
    doctor again.
-4. Otherwise apply the recovery map. Only involve the user for login / 2FA /
+4. If `actionsRefresh.needed`, follow **Workflow: Actions refresh**, then doctor again.
+5. Otherwise apply the recovery map. Only involve the user for login / 2FA /
    CAPTCHA / OAuth / explicit consent — one action.
 
 ## Recovery map
@@ -543,7 +565,8 @@ the previous public address is gone. Doctor already started a new one.
 | Symptom | Action |
 | --- | --- |
 | Bridge not running | `chatx start` (doctor does this automatically) |
-| Tunnel dead / URL unreachable / 全关掉后连接失效 | `chatx doctor` → if `namedRepair.needed`, login to Cloudflare and doctor again (do not Delete). If `chatgptRepair.needed`, tell the user the message, then **Delete** THIS workspace's connector only (`connectorName`) and create it again through New plugin → Server URL → OAuth. Never Reconnect. |
+| Tunnel dead / URL unreachable / 全关掉后连接失效 | `chatx doctor` → if `namedRepair.needed`, login to Cloudflare and doctor again (do not Delete). If `chatgptRepair.needed`, follow **Workflow: connector repair**. |
+| ChatGPT Actions are older than the local tool set | Follow **Workflow: Actions refresh**; do not change the Server URL. |
 | ChatGPT says tool call failed / 401 | token expired or revoked → re-pair (new pairing code + authorize) |
 | Pairing code rejected/expired | `chatx pair --json` for a fresh code |
 | Port conflict | handled automatically; never surface to the user |

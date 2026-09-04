@@ -39,12 +39,12 @@ First ChatX public alpha preparation.
 
 ### Added
 
-- ChatX product branding and `chatx` CLI, with `c2c` compatibility alias.
+- ChatX product branding and `chatx` CLI.
 - Direct local capabilities: workspace writes, local process execution, and dedicated-browser control.
 - Narrow capability scopes: `workspace.write`, `process.run`, and `browser.control`.
 - Cloudflare Quick/Named support.
 - An experimental OpenAI Secure MCP Tunnel prototype, later removed from the alpha.2 candidate in favor of the verified Server URL + OAuth path.
-- `.chatxignore` with `.c2cignore` compatibility.
+- `.chatxignore` with the previous ignore filename retained for compatibility.
 - Windows/Ubuntu CI on Node.js 20 and 22.
 - Deterministic npm package allow-list and clean-install release smoke test.
 - Tagged GitHub Release workflow producing a tarball and SHA-256 checksums.
@@ -52,9 +52,9 @@ First ChatX public alpha preparation.
 ### Compatibility
 
 - Existing `workspace.control` tokens remain accepted as a legacy broad control scope.
-- Existing connector names remain unchanged when already persisted.
-- Existing `codex-with-chatgpt` OS state directory is intentionally reused.
-- Existing `C2C_*` environment variables and token prefixes remain supported.
+- Persisted legacy connector titles are migrated to ChatX after the ChatGPT-side replacement is confirmed.
+- The previous OS state directory is intentionally reused so existing local state survives upgrades.
+- Legacy environment-variable aliases and token prefixes remain supported internally.
 
 ### Security documentation
 
