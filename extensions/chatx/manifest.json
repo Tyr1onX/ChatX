@@ -60,6 +60,7 @@
       ],
       "js": [
         "src/features.js",
+        "src/ui-prefs.js",
         "src/watcher/overlay.js"
       ],
       "run_at": "document_idle"

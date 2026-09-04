@@ -10,13 +10,15 @@
   <main>
     <header class="brand-header">
       <img src="icons/icon32.png" alt="" aria-hidden="true">
-      <h1>ChatX</h1>
+      <h1><span class="brand-mark">X_</span> ChatX</h1>
       <div class="language-switch" aria-label="Language">
         <button type="button" data-language="zh-CN" aria-pressed="true">中文</button>
         <span>/</span>
         <button type="button" data-language="en" aria-pressed="false">EN</button>
       </div>
     </header>
+
+    <div class="section-kicker">&gt; <span data-i18n="featuresHeading">功能</span></div>
 
     <label class="feature-row">
       <span><strong data-i18n="watcher">任务监听</strong><small data-i18n="watcherDescription">后台任务完成提醒</small></span>
@@ -59,9 +61,10 @@
       </div>
 
       <div class="runtime" aria-live="polite">
-        <div><span data-i18n="status">状态</span> <strong id="status">空闲</strong></div>
-        <div><span data-i18n="generation">第几代</span> <strong id="generation">1</strong></div>
-        <div><span data-i18n="round">第几轮</span> <strong id="round">0</strong></div>
+        <div class="terminal-label" data-i18n="terminalStatus">STATUS</div>
+        <div class="runtime-status"><span id="statusGlyph" class="terminal-glyph">X_</span><strong id="status">空闲</strong><span id="statusCursor" class="status-cursor">_</span></div>
+        <div id="runtimeMeta" class="runtime-meta">第 1 代 / 第 0 轮</div>
+
         <div id="errorRow" hidden><span data-i18n="error">错误</span> <strong id="error"></strong></div>
       </div>
 

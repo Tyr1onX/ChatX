@@ -46,6 +46,9 @@ function loadUiPrefs(initial?: unknown) {
       ): { x: number; y: number };
       t(language: string, key: string): string;
       statusLabel(language: string, status: string): string;
+      statusVisual(status: string): { tail: string; kind: string; cursor: boolean };
+      statusCharacter(status: string): string;
+      runtimeMeta(language: string, generation: number, round: number): string;
     },
     values,
     writes,
@@ -90,6 +93,30 @@ describe("ChatX UI preferences", () => {
     expect(prefs.statusLabel("zh-CN", "FAILED")).toBe("失败");
     expect(prefs.statusLabel("zh-CN", "STOPPED_USER")).toBe("已停止");
     expect(prefs.statusLabel("zh-CN", "UNKNOWN_STATE")).toBe("UNKNOWN_STATE");
+
+    expect(prefs.statusCharacter("IDLE")).toBe("X_");
+    expect(prefs.statusCharacter("DEVELOPING")).toBe("X...");
+    expect(prefs.statusCharacter("AUDITING")).toBe("X...");
+    expect(prefs.statusCharacter("ROLLOVER")).toBe("X...");
+    expect(prefs.statusCharacter("COMPLETED")).toBe("X!");
+    expect(prefs.statusCharacter("FAILED")).toBe("X×");
+    expect(prefs.statusCharacter("STOPPED_USER")).toBe("X||");
+    expect(prefs.statusCharacter("STOPPED_MAX_GENERATIONS")).toBe("X||");
+    expect(prefs.statusVisual("DEVELOPING").kind).toBe("working");
+    expect(prefs.statusVisual("FAILED").kind).toBe("failed");
+    expect(prefs.runtimeMeta("zh-CN", 2, 3)).toBe("第 2 代 / 第 3 轮");
+    expect(prefs.runtimeMeta("en", 2, 3)).toBe("G2 / R3");
+  });
+
+  it("keeps terminal status mapping presentation-only", () => {
+    const { prefs, writes } = loadUiPrefs();
+    const rawStatuses = ["IDLE", "DEVELOPING", "AUDITING", "COMPLETED", "FAILED", "STOPPED_USER"];
+
+    const characters = rawStatuses.map((status) => prefs.statusCharacter(status));
+
+    expect(characters).toEqual(["X_", "X...", "X...", "X!", "X×", "X||"]);
+    expect(rawStatuses).toEqual(["IDLE", "DEVELOPING", "AUDITING", "COMPLETED", "FAILED", "STOPPED_USER"]);
+    expect(writes).toHaveLength(0);
   });
 
   it("shares language preferences across popup and floating UI while keeping drag event-driven", () => {
@@ -99,6 +126,7 @@ describe("ChatX UI preferences", () => {
     const html = read("popup.html");
     const popup = read("popup.js");
     const floating = read("src/floating-ui.js");
+    const overlay = read("src/watcher/overlay.js");
 
     expect(html).toContain('data-language="zh-CN"');
     expect(html).toContain('data-language="en"');
@@ -111,6 +139,13 @@ describe("ChatX UI preferences", () => {
       manifest.content_scripts[2].js.indexOf("src/ui-api.js")
     );
 
+    expect(manifest.content_scripts[3].js.indexOf("src/ui-prefs.js")).toBeLessThan(
+      manifest.content_scripts[3].js.indexOf("src/watcher/overlay.js")
+    );
+    expect(overlay).toContain("globalThis.ChatXUiPrefs.get()");
+    expect(overlay).toContain("changes[globalThis.ChatXUiPrefs.KEY]");
+    expect(overlay).toContain('Prefs.t(language, "watcherDone")');
+
     expect(floating).toContain('launcher.addEventListener("pointerdown"');
     expect(floating).toContain('launcher.addEventListener("pointermove"');
     expect(floating).toContain('launcher.addEventListener("pointerup"');
@@ -121,6 +156,10 @@ describe("ChatX UI preferences", () => {
     expect(floating).toContain('window.addEventListener("resize"');
     expect(floating).toContain("Prefs.clampBubblePosition(position, window.innerWidth, window.innerHeight, BUBBLE_SIZE)");
     expect(floating).toContain("function positionPanel()");
+    expect(floating).toContain('const DRAG_THRESHOLD = 4');
+    expect(floating).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(floating).toContain('animation: chatx-cursor-blink 1.6s step-end infinite');
+    expect(floating).toContain('animation: chatx-working-dots 2.4s step-end infinite');
     expect(floating).not.toMatch(/\bsetInterval\s*\(/);
   });
 });

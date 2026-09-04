@@ -49,7 +49,39 @@
     }
     .launcher:hover { background: color-mix(in srgb, CanvasText 5%, Canvas); }
     .launcher.dragging { cursor: grabbing; }
-    .launcher img { width: 30px; height: 30px; display: block; pointer-events: none; }
+    .launcher-mark {
+      min-width: 26px;
+      font: 750 16px/1 "Cascadia Mono", Consolas, monospace;
+      letter-spacing: -0.06em;
+      white-space: nowrap;
+    }
+    .launcher-tail {
+      display: inline-block;
+      min-width: 1ch;
+      text-align: left;
+    }
+    .launcher[data-visual="idle"] .launcher-tail {
+      animation: chatx-cursor-blink 1.6s step-end infinite;
+    }
+    .launcher[data-visual="working"] .launcher-tail {
+      width: 1ch;
+      overflow: hidden;
+      vertical-align: bottom;
+      animation: chatx-working-dots 2.4s step-end infinite;
+    }
+    @keyframes chatx-cursor-blink {
+      0%, 54% { opacity: 1; }
+      55%, 100% { opacity: 0.22; }
+    }
+    @keyframes chatx-working-dots {
+      0%, 32% { width: 1ch; }
+      33%, 65% { width: 2ch; }
+      66%, 100% { width: 3ch; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .launcher-tail { animation: none !important; }
+      .launcher[data-visual="working"] .launcher-tail { width: 3ch; }
+    }
     .panel {
       position: absolute;
       width: min(316px, calc(100vw - 32px));
@@ -70,6 +102,16 @@
       margin-bottom: 5px;
     }
     .brand { font-size: 15px; font-weight: 700; }
+    .brand-mark, .section-kicker, .terminal-label, .terminal-glyph, .status-cursor, .runtime-meta {
+      font-family: "Cascadia Mono", Consolas, monospace;
+    }
+    .brand-mark { font-weight: 750; }
+    .section-kicker {
+      margin: 2px 0 6px;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0.68;
+    }
     .header-actions, .language-switch {
       display: flex;
       align-items: center;
@@ -117,7 +159,23 @@
     .bridge[hidden] { display: none; }
     .agents, .runtime { display: grid; gap: 4px; font-size: 12px; }
     .agents { margin-bottom: 9px; }
-    .runtime { margin-top: 9px; }
+    .runtime {
+      margin-top: 9px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: color-mix(in srgb, CanvasText 4%, transparent);
+    }
+    .terminal-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      opacity: 0.56;
+    }
+    .runtime-status { display: flex; align-items: baseline; gap: 8px; }
+    .terminal-glyph { min-width: 30px; font-size: 13px; font-weight: 750; }
+    #status { text-transform: uppercase; letter-spacing: 0.03em; }
+    .status-cursor { margin-left: -8px; }
+    .runtime-meta { font-size: 11px; opacity: 0.64; }
     .field-label {
       display: block;
       margin-bottom: 4px;
@@ -158,7 +216,7 @@
   panel.hidden = true;
   panel.innerHTML = `
     <div class="header">
-      <strong class="brand">ChatX</strong>
+      <strong class="brand"><span class="brand-mark">X_</span> ChatX</strong>
       <div class="header-actions">
         <div class="language-switch" aria-label="Language">
           <button type="button" data-language="zh-CN" aria-pressed="true">中文</button>
@@ -168,6 +226,7 @@
         <button class="close" type="button" aria-label="关闭 ChatX">×</button>
       </div>
     </div>
+    <div class="section-kicker">&gt; <span data-i18n="featuresHeading">功能</span></div>
     <label class="feature-row"><span data-i18n="watcher">任务监听</span><input id="watcherToggle" type="checkbox"></label>
     <label class="feature-row"><span data-i18n="sessionGuard">会话保护</span><input id="sessionGuardToggle" type="checkbox"></label>
     <label class="feature-row"><span data-i18n="agentBridge">Agent Bridge / 智能协作</span><input id="agentBridgeToggle" type="checkbox"></label>
@@ -189,9 +248,10 @@
         <button id="stop" type="button" data-i18n="stop">停止</button>
       </div>
       <div class="runtime" aria-live="polite">
-        <div><span data-i18n="status">状态</span> <strong id="status">空闲</strong></div>
-        <div><span data-i18n="generation">第几代</span> <strong id="generation">1</strong></div>
-        <div><span data-i18n="round">第几轮</span> <strong id="round">0</strong></div>
+        <div class="terminal-label" data-i18n="terminalStatus">STATUS</div>
+        <div class="runtime-status"><span id="statusGlyph" class="terminal-glyph">X_</span><strong id="status">空闲</strong><span id="statusCursor" class="status-cursor">_</span></div>
+        <div id="runtimeMeta" class="runtime-meta">第 1 代 / 第 0 轮</div>
+
         <div id="errorRow" hidden><span data-i18n="error">错误</span> <strong id="error"></strong></div>
       </div>
       <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
@@ -203,11 +263,14 @@
   launcher.type = "button";
   launcher.setAttribute("aria-label", "打开 ChatX");
   launcher.setAttribute("aria-expanded", "false");
-  const icon = document.createElement("img");
-  icon.src = chrome.runtime.getURL("icons/icon32.png");
-  icon.alt = "";
-  icon.setAttribute("aria-hidden", "true");
-  launcher.append(icon);
+  const launcherMark = document.createElement("span");
+  launcherMark.className = "launcher-mark";
+  const launcherTail = document.createElement("span");
+  launcherTail.className = "launcher-tail";
+  launcherTail.textContent = "_";
+  launcherMark.append("X", launcherTail);
+
+  launcher.append(launcherMark);
 
   shadow.append(style, panel, launcher);
   document.documentElement.append(host);
@@ -302,6 +365,13 @@
     positionPanel();
   }
 
+  function renderLauncherVisual() {
+    const status = features.agentBridge && currentState ? currentState.status : "IDLE";
+    const visual = Prefs.statusVisual(status);
+    launcher.dataset.visual = visual.kind;
+    launcherTail.textContent = visual.tail;
+  }
+
   function updateStartEnabled() {
     const taskReady = $("task").value.trim().length > 0;
     $("start").disabled = !features.agentBridge
@@ -316,9 +386,13 @@
     currentState = state;
     $("developerState").textContent = Prefs.t(uiPrefs.language, state.developerAssigned ? "assigned" : "missing");
     $("auditorState").textContent = Prefs.t(uiPrefs.language, state.auditorAssigned ? "assigned" : "missing");
+    const visual = Prefs.statusVisual(state.status);
+    $("statusGlyph").textContent = Prefs.statusCharacter(state.status);
+    $("statusGlyph").dataset.visual = visual.kind;
     $("status").textContent = Prefs.statusLabel(uiPrefs.language, state.status);
-    $("generation").textContent = String(state.generation);
-    $("round").textContent = String(state.round);
+    $("statusCursor").hidden = !visual.cursor;
+    $("runtimeMeta").textContent = Prefs.runtimeMeta(uiPrefs.language, state.generation, state.round);
+
     const failed = state.status === "FAILED" && state.error;
     $("errorRow").hidden = !failed;
     $("error").textContent = failed ? state.error : "";
@@ -331,6 +405,7 @@
     $("assignDeveloper").disabled = running;
     $("assignAuditor").disabled = running;
     $("stop").disabled = !running;
+    renderLauncherVisual();
     updateStartEnabled();
   }
 
@@ -340,6 +415,7 @@
     $("agentBridgeToggle").checked = features.agentBridge;
     $("agentBridgeControls").hidden = !features.agentBridge;
     if (!features.agentBridge) clearNotice();
+    renderLauncherVisual();
     positionPanel();
   }
 

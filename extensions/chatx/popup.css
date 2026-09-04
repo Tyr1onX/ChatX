@@ -28,6 +28,24 @@ h1 {
   font-size: 18px;
 }
 
+.brand-mark,
+.section-kicker,
+.terminal-label,
+.terminal-glyph,
+.status-cursor,
+.runtime-meta {
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.brand-mark { font-weight: 750; }
+
+.section-kicker {
+  margin: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.68;
+}
+
 .language-switch {
   display: flex;
   align-items: center;
@@ -136,7 +154,43 @@ button {
 
 button:disabled { cursor: default; opacity: 0.5; }
 
-.runtime { margin: 10px 0 0; }
+.runtime {
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, CanvasText 4%, transparent);
+}
+
+.terminal-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  opacity: 0.56;
+}
+
+.runtime-status {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.terminal-glyph {
+  min-width: 30px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+#status {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-cursor { margin-left: -8px; }
+
+.runtime-meta {
+  font-size: 11px;
+  opacity: 0.64;
+}
 
 #notice {
   margin: 8px 0 0;

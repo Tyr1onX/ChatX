@@ -18,7 +18,7 @@ describe("ChatX unified browser extension", () => {
     const manifest = JSON.parse(read("manifest.json")) as { action: { default_popup: string } };
 
     expect(manifest.action.default_popup).toBe("popup.html");
-    expect(html).toContain("<h1>ChatX</h1>");
+    expect(html).toContain('<span class="brand-mark">X_</span> ChatX');
     expect(html).toContain('id="watcherToggle"');
     expect(html).toContain('id="sessionGuardToggle"');
     expect(html).toContain('id="agentBridgeToggle"');
@@ -68,7 +68,7 @@ describe("ChatX unified browser extension", () => {
     expect(floating).toContain('Ui.assign("auditor")');
     expect(floating).toContain("Ui.start({");
     expect(floating).toContain("Ui.stop()");
-    for (const label of ["任务监听", "会话保护", "Agent Bridge / 智能协作", "开发者", "审计者", "任务", "最大轮数", "最大代数", "状态", "第几代", "第几轮"]) {
+    for (const label of ["任务监听", "会话保护", "Agent Bridge / 智能协作", "开发者", "审计者", "任务", "最大轮数", "最大代数", "STATUS", "X_", "第 1 代 / 第 0 轮"]) {
       expect(floating).toContain(label);
     }
     for (const forbidden of ["timeline", "requestId", "completion marker", "storage 原始状态"]) {

@@ -11,6 +11,13 @@
     "zh-CN": Object.freeze({
       watcher: "任务监听",
       watcherDescription: "后台任务完成提醒",
+      featuresHeading: "功能",
+      terminalStatus: "STATUS",
+      watcherDoneStatus: "DONE",
+      watcherDone: "后台任务已完成",
+      watcherConversationFallback: "ChatGPT 对话",
+      view: "查看 →",
+      close: "关闭",
       sessionGuard: "会话保护",
       sessionGuardDescription: "长会话性能保护",
       agentBridge: "Agent Bridge / 智能协作",
@@ -54,6 +61,13 @@
     en: Object.freeze({
       watcher: "Watcher",
       watcherDescription: "Background task completion alerts",
+      featuresHeading: "Features",
+      terminalStatus: "STATUS",
+      watcherDoneStatus: "DONE",
+      watcherDone: "Task completed",
+      watcherConversationFallback: "ChatGPT conversation",
+      view: "View →",
+      close: "Close",
       sessionGuard: "Session Guard",
       sessionGuardDescription: "Long-session performance protection",
       agentBridge: "Agent Bridge",
@@ -95,6 +109,17 @@
       "error.AGENT_BRIDGE_DISABLED": "Agent Bridge is off.",
     }),
   });
+  const STATUS_VISUALS = Object.freeze({
+    IDLE: Object.freeze({ tail: "_", kind: "idle", cursor: true }),
+    DEVELOPING: Object.freeze({ tail: "...", kind: "working", cursor: true }),
+    AUDITING: Object.freeze({ tail: "...", kind: "working", cursor: true }),
+    ROLLOVER: Object.freeze({ tail: "...", kind: "working", cursor: true }),
+    COMPLETED: Object.freeze({ tail: "!", kind: "completed", cursor: false }),
+    FAILED: Object.freeze({ tail: "×", kind: "failed", cursor: false }),
+    STOPPED_USER: Object.freeze({ tail: "||", kind: "stopped", cursor: false }),
+    STOPPED_MAX_GENERATIONS: Object.freeze({ tail: "||", kind: "stopped", cursor: false }),
+  });
+  const FALLBACK_VISUAL = Object.freeze({ tail: "", kind: "static", cursor: false });
   let writeQueue = Promise.resolve();
 
   function normalizePosition(value) {
@@ -153,6 +178,20 @@
     return t(language, `status.${status}`) === `status.${status}` ? status : t(language, `status.${status}`);
   }
 
+  function statusVisual(status) {
+    return STATUS_VISUALS[status] ?? FALLBACK_VISUAL;
+  }
+
+  function statusCharacter(status) {
+    return `X${statusVisual(status).tail}`;
+  }
+
+  function runtimeMeta(language, generation, round) {
+    return language === "en"
+      ? `G${generation} / R${round}`
+      : `第 ${generation} 代 / 第 ${round} 轮`;
+  }
+
   function errorLabel(language, error) {
     const code = error instanceof Error ? error.message : String(error);
     const key = `error.${code}`;
@@ -170,6 +209,9 @@
     setBubblePosition,
     t,
     statusLabel,
+    statusVisual,
+    statusCharacter,
+    runtimeMeta,
     errorLabel,
   });
 })();

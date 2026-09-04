@@ -38,6 +38,7 @@ describe("ChatX Watcher extension constraints", () => {
     expect(manifest.content_scripts[0].matches).toEqual(["https://chatgpt.com/*"]);
     expect(manifest.content_scripts[2].js).toContain("src/watcher/content.js");
     expect(manifest.content_scripts[3].matches.sort()).toEqual(["http://*/*", "https://*/*"].sort());
+    expect(manifest.content_scripts[3].js).toContain("src/ui-prefs.js");
     expect(manifest.content_scripts[3].js).toContain("src/watcher/overlay.js");
     expect(JSON.stringify(manifest)).not.toContain("<all_urls>");
   });
@@ -60,7 +61,8 @@ describe("ChatX Watcher extension constraints", () => {
     expect(background).toContain("focusConversation");
     expect(overlay).toContain("SHOW_COMPLETION_OVERLAY");
     expect(overlay).toContain("OPEN_COMPLETION");
-    expect(overlay).toContain('view.textContent = "查看 →"');
+    expect(overlay).toContain('view.dataset.i18n = "view"');
+    expect(overlay).toContain('Prefs.t(language, "view")');
     expect(popup).not.toContain("completionMode");
     expect(popup).not.toContain("OPEN_COMPLETION");
   });
@@ -91,7 +93,7 @@ describe("ChatX Watcher extension constraints", () => {
     expect(background).toContain("await hideOverlay(sender.tab?.id, run.runId)");
   });
 
-  it("uses a single Shadow DOM host and a one-shot animation without polling or network", () => {
+  it("uses a single Shadow DOM host and terminal completion visual without polling or network", () => {
     const source = runtimeSource();
     const overlay = read("src/watcher/overlay.js");
 
@@ -102,10 +104,11 @@ describe("ChatX Watcher extension constraints", () => {
     expect(overlay).toContain("right:22px");
     expect(overlay).toContain("bottom:22px");
     expect(overlay).toContain("z-index:2147483647");
-    expect(overlay).toContain('"[._.]"');
-    expect(overlay).toContain('"[-_-]"');
-    expect(overlay).toContain('"[^_^] !"');
-    expect(overlay.match(/\bsetTimeout\s*\(/g)?.length ?? 0).toBe(2);
+    expect(overlay).toContain('"╭─ X_ ChatX ─────────────────╮"');
+    expect(overlay).toContain('status.dataset.i18n = "watcherDoneStatus"');
+    expect(overlay).toContain('summary.dataset.i18n = "watcherDone"');
+    expect(overlay.match(/\bsetTimeout\s*\(/g)?.length ?? 0).toBe(0);
+    expect(overlay).not.toMatch(/\[\._\.\]|\[-_-\]|\[\^_\^\]/);
     expect(overlay).not.toContain("MutationObserver");
     expect(source).not.toMatch(/\bsetInterval\s*\(/);
     expect(source).not.toMatch(/\bfetch\s*\(/);

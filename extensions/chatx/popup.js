@@ -55,9 +55,12 @@ function renderBridge(state, hydrateInputs = false) {
   currentState = state;
   $("developerState").textContent = Prefs.t(uiPrefs.language, state.developerAssigned ? "assigned" : "missing");
   $("auditorState").textContent = Prefs.t(uiPrefs.language, state.auditorAssigned ? "assigned" : "missing");
+  const visual = Prefs.statusVisual(state.status);
+  $("statusGlyph").textContent = Prefs.statusCharacter(state.status);
+  $("statusGlyph").dataset.visual = visual.kind;
   $("status").textContent = Prefs.statusLabel(uiPrefs.language, state.status);
-  $("generation").textContent = String(state.generation);
-  $("round").textContent = String(state.round);
+  $("statusCursor").hidden = !visual.cursor;
+  $("runtimeMeta").textContent = Prefs.runtimeMeta(uiPrefs.language, state.generation, state.round);
 
   const failed = state.status === "FAILED" && state.error;
   $("errorRow").hidden = !failed;
