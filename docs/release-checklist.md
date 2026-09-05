@@ -7,14 +7,14 @@ For `v0.1.0-alpha.1` and later tagged releases:
 3. `corepack pnpm test`.
 4. `corepack pnpm typecheck`.
 5. `corepack pnpm build`.
-6. `corepack pnpm audit --prod`.
+6. `corepack pnpm security:audit` — must report `PASS`. Known vulnerabilities fail; registry/advisory-service unavailability is reported separately and also blocks the release.
 7. `corepack pnpm release:smoke` — must pack, install into a clean temp directory, and execute the packaged CLI.
 8. `git diff --check`.
-9. Run the repository secret-pattern scan; do not print matched secret contents.
+9. `corepack pnpm security:secrets` — scans tracked and unignored untracked repository files for high-confidence secret patterns and reports only path, line, and rule names.
 10. Confirm README, security docs and version constants match the tag.
 11. Verify Cloudflare automated regression remains green. OpenAI Tunnel is experimental unless a real ChatGPT-side Tunnel connector smoke has been completed for the release.
 12. Merge the release branch into `main` without rewriting history.
 13. Tag the exact release commit, e.g. `v0.1.0-alpha.1`, and push the tag.
-14. GitHub Actions `Release` must publish `.tgz` and `SHA256SUMS.txt` successfully.
+14. GitHub Actions `Release` must run `corepack pnpm release:check` successfully before publishing `.tgz` and `SHA256SUMS.txt`.
 
 Do not tag a release if the clean package install smoke fails even when source-tree tests pass.

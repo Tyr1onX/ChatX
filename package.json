@@ -47,7 +47,9 @@
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
     "release:smoke": "node scripts/release-smoke.mjs",
-    "release:check": "npm run test && npm run typecheck && npm run build && npm run release:smoke"
+    "security:audit": "node scripts/production-audit.mjs",
+    "security:secrets": "node scripts/secret-scan.mjs",
+    "release:check": "npm run test && npm run typecheck && npm run build && node scripts/production-audit.mjs && node scripts/secret-scan.mjs && git diff --check && npm run release:smoke"
   },
   "packageManager": "pnpm@10.17.1",
   "publishConfig": {

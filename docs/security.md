@@ -105,4 +105,4 @@ Legacy token prefixes are also retained internally for compatibility and must co
 
 ## Security release gate
 
-Before a tagged release, the repository must pass tests, typecheck, build, production dependency audit, secret-pattern scan, `git diff --check`, and a clean tarball install smoke. CI covers Windows, macOS, and Linux where configured by the current workflow.
+Before a tagged release, `.github/workflows/release.yml` runs `pnpm release:check`. That gate runs tests, typecheck, build, a production dependency audit, the repository secret-pattern scan, `git diff --check`, and the clean tarball install smoke. The dependency audit only passes on an explicit clean verdict: known vulnerabilities fail the gate, while registry/advisory-service failures are reported as `UNAVAILABLE` and also block the release because no vulnerability verdict was produced. The secret scan checks high-confidence ChatX token formats, common private-key headers, and a small set of well-known credential formats; it reports only file, line, and rule names, not matched secret contents.

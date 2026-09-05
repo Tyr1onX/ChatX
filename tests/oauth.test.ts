@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import fs from "node:fs";
 import path from "node:path";
 import { startBridge, type Bridge } from "../src/bridge/server.js";
-import { filterScopes } from "../src/auth/store.js";
+import { AuthStore, DEFAULT_SCOPES, MAX_REGISTERED_OAUTH_CLIENTS, filterScopes } from "../src/auth/store.js";
 import { makeTmpDir, cleanup, write, isolateStateDir, pkceVerifierAndChallenge } from "./helpers.js";
 
 let root: string;
@@ -29,6 +30,7 @@ afterAll(async () => {
 });
 
 async function registerClient(): Promise<string> {
+  bridge.pairing.create();
   const response = await fetch(`${base}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -110,6 +112,44 @@ describe("discovery metadata", () => {
   });
 });
 
+describe("dynamic client registration pairing gate", () => {
+  it("rejects registration without an active pairing session", async () => {
+    bridge.pairing.invalidateAll();
+    const response = await fetch(`${base}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "No-Pairing", redirect_uris: [REDIRECT_URI] }),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "pairing_required",
+      error_description: "An active pairing session is required to register an OAuth client",
+    });
+  });
+
+  it("allows registration during pairing and keeps the registered client valid afterwards", async () => {
+    bridge.pairing.create();
+    const response = await fetch(`${base}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Pairing-Gated", redirect_uris: [REDIRECT_URI] }),
+    });
+    expect(response.status).toBe(201);
+    const client = (await response.json()) as { client_id: string };
+
+    bridge.pairing.invalidateAll();
+    const { challenge } = pkceVerifierAndChallenge();
+    const authorizeUrl = new URL(`${base}/oauth/authorize`);
+    authorizeUrl.searchParams.set("client_id", client.client_id);
+    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+    expect((await fetch(authorizeUrl, { redirect: "manual" })).status).toBe(200);
+  });
+});
+
 describe("authorization + token flow", () => {
   it("completes the full pairing + PKCE flow and calls MCP", async () => {
     const clientId = await registerClient();
@@ -165,6 +205,7 @@ describe("authorization + token flow", () => {
 
     try {
       const xssBase = xssBridge.localBaseUrl();
+      xssBridge.pairing.create();
       const registration = await fetch(`${xssBase}/oauth/register`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -257,6 +298,34 @@ describe("authorization + token flow", () => {
 });
 
 describe("scope defaults", () => {
+  it("keeps current defaults when scope is missing or empty", () => {
+    expect(filterScopes(undefined)).toEqual(DEFAULT_SCOPES);
+    expect(filterScopes("   ")).toEqual(DEFAULT_SCOPES);
+  });
+
+  it("returns exactly the requested supported scopes", () => {
+    expect(filterScopes("workspace.read process.run offline_access")).toEqual([
+      "workspace.read",
+      "process.run",
+      "offline_access",
+    ]);
+  });
+
+  it("drops unknown scopes without adding permissions", () => {
+    expect(filterScopes("workspace.read unknown.scope process.run another.unknown")).toEqual([
+      "workspace.read",
+      "process.run",
+    ]);
+  });
+
+  it("returns no scopes for an explicit all-unknown request", () => {
+    const scopes = filterScopes("unknown.scope another.unknown");
+    expect(scopes).toEqual([]);
+    expect(scopes).not.toContain("process.run");
+    expect(scopes).not.toContain("workspace.write");
+    expect(scopes).not.toContain("browser.control");
+  });
+
   it("does not grant deprecated workspace.control by default", () => {
     const scopes = filterScopes(undefined);
     expect(scopes).toContain("workspace.write");
@@ -267,6 +336,93 @@ describe("scope defaults", () => {
 
   it("still accepts workspace.control when a legacy client explicitly requests it", () => {
     expect(filterScopes("workspace.read workspace.control")).toEqual(["workspace.read", "workspace.control"]);
+  });
+});
+
+describe("invalid scope authorization", () => {
+  it("fails an explicit all-unknown scope request with invalid_scope", async () => {
+    const clientId = await registerClient();
+    const { challenge } = pkceVerifierAndChallenge();
+    const authorizeUrl = new URL(`${base}/oauth/authorize`);
+    authorizeUrl.searchParams.set("client_id", clientId);
+    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("state", "scope-state");
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+    authorizeUrl.searchParams.set("scope", "unknown.scope another.unknown");
+
+    const response = await fetch(authorizeUrl, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const redirect = new URL(location!);
+    expect(redirect.searchParams.get("error")).toBe("invalid_scope");
+    expect(redirect.searchParams.get("state")).toBe("scope-state");
+  });
+});
+
+describe("dynamic client registration capacity", () => {
+  it("enforces the persisted per-workspace hard limit without replacing existing clients", async () => {
+    const workspaceRoot = makeTmpDir("oauth-cap-ws");
+    const authDir = makeTmpDir("oauth-cap-auth");
+    const authFile = path.join(authDir, "store.json");
+    const seedStore = new AuthStore("seed-workspace", { file: authFile });
+    let existingClientId = "";
+
+    try {
+      for (let i = 0; i < MAX_REGISTERED_OAUTH_CLIENTS; i += 1) {
+        const client = seedStore.registerClient({ clientName: `seed-${i}`, redirectUris: [REDIRECT_URI] });
+        expect(client).not.toBeNull();
+        if (i === 0) existingClientId = client!.clientId;
+      }
+
+      const before = JSON.parse(fs.readFileSync(authFile, "utf8")) as { clients: unknown[] };
+      expect(before.clients).toHaveLength(MAX_REGISTERED_OAUTH_CLIENTS);
+
+      const cappedBridge = await startBridge({
+        workspaceRoot,
+        port: 0,
+        persistRuntime: false,
+        authStoreFile: authFile,
+      });
+      try {
+        expect(cappedBridge.authStore.getClient(existingClientId)).toBeTruthy();
+        const { challenge } = pkceVerifierAndChallenge();
+        const authorizeUrl = new URL(`${cappedBridge.localBaseUrl()}/oauth/authorize`);
+        authorizeUrl.searchParams.set("client_id", existingClientId);
+        authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+        authorizeUrl.searchParams.set("response_type", "code");
+        authorizeUrl.searchParams.set("code_challenge", challenge);
+        authorizeUrl.searchParams.set("code_challenge_method", "S256");
+        expect((await fetch(authorizeUrl, { redirect: "manual" })).status).toBe(200);
+        cappedBridge.pairing.create();
+        const rejected = await fetch(`${cappedBridge.localBaseUrl()}/oauth/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ client_name: "over-limit", redirect_uris: [REDIRECT_URI] }),
+        });
+        expect(rejected.status).toBe(429);
+        await expect(rejected.json()).resolves.toEqual({
+          error: "registration_limit_reached",
+          error_description: "OAuth client registration limit reached for this workspace",
+        });
+      } finally {
+        await cappedBridge.close();
+      }
+
+      const after = JSON.parse(fs.readFileSync(authFile, "utf8")) as { clients: unknown[] };
+      expect(after.clients).toHaveLength(MAX_REGISTERED_OAUTH_CLIENTS);
+      const restartedStore = new AuthStore("restart-workspace", { file: authFile });
+      expect(restartedStore.getClient(existingClientId)).toBeTruthy();
+      expect(restartedStore.registerClient({ clientName: "still-over-limit", redirectUris: [REDIRECT_URI] })).toBeNull();
+      expect((JSON.parse(fs.readFileSync(authFile, "utf8")) as { clients: unknown[] }).clients).toHaveLength(
+        MAX_REGISTERED_OAUTH_CLIENTS
+      );
+    } finally {
+      cleanup(workspaceRoot);
+      cleanup(authDir);
+    }
   });
 });
 

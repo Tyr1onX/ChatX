@@ -70,6 +70,7 @@ export type VerifyTokenResult =
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
+export const MAX_REGISTERED_OAUTH_CLIENTS = 128;
 
 function sha256hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -127,7 +128,8 @@ export class AuthStore {
 
   // ---- Dynamic Client Registration -------------------------------------
 
-  registerClient(input: { clientName?: string; redirectUris: string[] }): ClientRegistration {
+  registerClient(input: { clientName?: string; redirectUris: string[] }): ClientRegistration | null {
+    if (this.clients.size >= MAX_REGISTERED_OAUTH_CLIENTS) return null;
     const client: ClientRegistration = {
       clientId: `c2c_client_${randomBytes(12).toString("base64url")}`,
       clientName: input.clientName,
@@ -290,5 +292,5 @@ export function filterScopes(requested: string | undefined): string[] {
   if (!requested || requested.trim() === "") return [...DEFAULT_SCOPES];
   const asked = requested.split(/[\s+]+/).filter(Boolean);
   const granted = asked.filter((scope) => (SUPPORTED_SCOPES as readonly string[]).includes(scope));
-  return granted.length > 0 ? granted : [...DEFAULT_SCOPES];
+  return granted;
 }

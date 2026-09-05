@@ -166,6 +166,13 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
   // ---- Dynamic Client Registration (RFC 7591) ------------------------------
 
   router.post("/oauth/register", json(), (req, res) => {
+    if (!deps.pairing.hasActiveSession()) {
+      res.status(403).json({
+        error: "pairing_required",
+        error_description: "An active pairing session is required to register an OAuth client",
+      });
+      return;
+    }
     const body = req.body as { client_name?: string; redirect_uris?: unknown };
     const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
     if (
@@ -182,6 +189,13 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       clientName: typeof body.client_name === "string" ? body.client_name.slice(0, 200) : undefined,
       redirectUris: redirectUris as string[],
     });
+    if (!client) {
+      res.status(429).json({
+        error: "registration_limit_reached",
+        error_description: "OAuth client registration limit reached for this workspace",
+      });
+      return;
+    }
     deps.logger.info(`Registered OAuth client ${client.clientId} (${client.clientName ?? "unnamed"})`);
     res.status(201).json({
       client_id: client.clientId,
@@ -226,6 +240,10 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       return;
     }
     const scopes = filterScopes(query.scope);
+    if (query.scope?.trim() && scopes.length === 0) {
+      fail("invalid_scope", "None of the requested scopes are supported");
+      return;
+    }
     const request: PendingAuthRequest = {
       id: randomBytes(16).toString("hex"),
       clientId: client.clientId,
