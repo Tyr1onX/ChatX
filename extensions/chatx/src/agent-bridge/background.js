@@ -14,6 +14,8 @@ const DEFAULT_INITIAL_TASK = [
 ].join(" ");
 const RUNNING_STATUSES = new Set(["DEVELOPING", "AUDITING", "ROLLOVER"]);
 const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED", "STOPPED_MAX_GENERATIONS", "STOPPED_USER"]);
+let initialMaterializationQueue = Promise.resolve();
+let initialCreateInFlight = null;
 
 async function isFeatureEnabled() {
   return (await Features.get()).agentBridge;
@@ -28,6 +30,7 @@ function emptyState() {
     version: 4,
     developerTabId: null,
     auditorTabId: null,
+    agentTabOwnership: { developer: null, auditor: null },
     status: null,
     round: 0,
     maxRounds: DEFAULT_MAX_ROUNDS,
@@ -48,13 +51,26 @@ function emptyState() {
     agentTabsCreatedThisRun: 0,
     generationCreatedFor: {},
     bindings: Bindings.emptyBindings(),
+    initialMaterialization: null,
     updatedAt: Date.now(),
+  };
+}
+
+function normalizeAgentTabOwnership(value) {
+  return {
+    developer: value?.developer === "managed" || value?.developer === "external" ? value.developer : null,
+    auditor: value?.auditor === "managed" || value?.auditor === "external" ? value.auditor : null,
   };
 }
 
 function normalizeStoredState(stored) {
   if (!stored) return emptyState();
-  if (stored.version === 4) return { ...emptyState(), ...stored, bindings: Bindings.normalizeBindings(stored.bindings) };
+  if (stored.version === 4) return {
+    ...emptyState(),
+    ...stored,
+    agentTabOwnership: normalizeAgentTabOwnership(stored.agentTabOwnership),
+    bindings: Bindings.normalizeBindings(stored.bindings),
+  };
   return {
     ...emptyState(),
     ...stored,
@@ -66,6 +82,7 @@ function normalizeStoredState(stored) {
     checkpointId: stored.checkpointId ?? null,
     initialTask: stored.initialTask ?? null,
     checkpoint: stored.checkpoint ?? null,
+    agentTabOwnership: normalizeAgentTabOwnership(stored.agentTabOwnership),
     bindings: Bindings.normalizeBindings(stored.bindings),
     rolloverStatus: stored.rolloverStatus ?? null,
   };
@@ -89,10 +106,12 @@ function addEvent(state, type, data = {}) {
   };
 }
 
+function isChatGptUrl(url) {
+  return typeof url === "string" && url.startsWith("https://chatgpt.com/");
+}
+
 function isChatGptTab(tab) {
-  return typeof tab?.id === "number"
-    && typeof tab.url === "string"
-    && tab.url.startsWith("https://chatgpt.com/");
+  return typeof tab?.id === "number" && isChatGptUrl(tab.url);
 }
 
 async function getTabOrNull(tabId) {
@@ -179,17 +198,21 @@ async function readAgentTabs(state) {
   return { developer, auditor };
 }
 
-async function assertForegroundStable(state) {
-  const smoke = state.smoke;
-  if (!smoke) throw new Error("SMOKE_EVIDENCE_MISSING");
-  const foreground = await captureForeground(smoke.foregroundWindowId);
-  if (!foreground.focused || foreground.focusedWindowId !== smoke.initial.focusedWindowId) {
+async function assertForegroundSnapshot(windowId, initial, requireActiveTab = true) {
+  const foreground = await captureForeground(windowId);
+  if (!foreground.focused || foreground.focusedWindowId !== initial?.focusedWindowId) {
     throw new Error("FOCUSED_WINDOW_CHANGED");
   }
-  if (smoke.sameWindow && foreground.activeTabId !== smoke.initial.activeTabId) {
+  if (requireActiveTab && foreground.activeTabId !== initial?.activeTabId) {
     throw new Error("FOREGROUND_ACTIVE_TAB_CHANGED");
   }
   return foreground;
+}
+
+async function assertForegroundStable(state) {
+  const smoke = state.smoke;
+  if (!smoke) throw new Error("SMOKE_EVIDENCE_MISSING");
+  return assertForegroundSnapshot(smoke.foregroundWindowId, smoke.initial, smoke.sameWindow);
 }
 
 async function assertRuntimeSurface(state) {
@@ -214,6 +237,124 @@ async function assertNewRolloverTabsInactive(state) {
   if (developer.active || auditor.active) throw new Error("NEW_AGENT_TAB_BECAME_ACTIVE");
   await assertForegroundStable(state);
   return { developer, auditor };
+}
+
+function serializeInitialMaterialization(task) {
+  const next = initialMaterializationQueue.then(task, task);
+  initialMaterializationQueue = next.catch(() => {});
+  return next;
+}
+
+function isInitialMaterializationPending(state) {
+  const materialization = state.initialMaterialization;
+  return Boolean(materialization
+    && materialization.phase !== "COMPLETE"
+    && !TERMINAL_STATUSES.has(state.status));
+}
+
+function initialMaterializationRoleForTab(state, tabId) {
+  const materialization = state.initialMaterialization;
+  if (!materialization || typeof tabId !== "number") return null;
+  if (materialization.developerTabId === tabId) return "developer";
+  if (materialization.auditorTabId === tabId) return "auditor";
+  return null;
+}
+
+function captureEarlyInitialContentReady(state, tab) {
+  const flight = initialCreateInFlight;
+  const materialization = state.initialMaterialization;
+  if (!flight || !materialization || !isInitialMaterializationPending(state)) return false;
+  const claimedPhase = flight.role === "developer" ? "DEVELOPER_CREATE_CLAIMED" : "AUDITOR_CREATE_CLAIMED";
+  if (materialization.phase !== claimedPhase
+      || typeof tab?.id !== "number"
+      || tab.windowId !== flight.windowId
+      || tab.active
+      || Bindings.conversationIdFromHref(tab.url) !== flight.conversationId) {
+    return false;
+  }
+  flight.readyTabId = tab.id;
+  return true;
+}
+
+async function persistEarlyInitialContentReady(state, role, tabId) {
+  const materialization = state.initialMaterialization;
+  const tabField = role === "developer" ? "developerTabId" : "auditorTabId";
+  const readyField = role === "developer" ? "developerReady" : "auditorReady";
+  if (!isInitialMaterializationPending(state)
+      || materialization?.[tabField] !== tabId
+      || materialization?.[readyField]) {
+    return state;
+  }
+  return putState(addEvent({
+    ...state,
+    initialMaterialization: {
+      ...materialization,
+      [readyField]: true,
+    },
+  }, "INITIAL_CONTENT_READY", { role, tabId, early: true }));
+}
+
+async function assertInitialForegroundStable(state) {
+  const materialization = state.initialMaterialization;
+  if (!materialization) throw new Error("INITIAL_MATERIALIZATION_STATE_MISSING");
+  return assertForegroundSnapshot(
+    materialization.windowId,
+    materialization.initialForeground,
+    true,
+  );
+}
+
+async function requireInitialMaterializedTab(state, role, { requireLoadedIdentity = true } = {}) {
+  const materialization = state.initialMaterialization;
+  if (!materialization) throw new Error("INITIAL_MATERIALIZATION_STATE_MISSING");
+  const tabId = role === "developer" ? materialization.developerTabId : materialization.auditorTabId;
+  const binding = role === "developer" ? materialization.developerBinding : materialization.auditorBinding;
+  if (typeof tabId !== "number") throw new Error(`INITIAL_${role.toUpperCase()}_TAB_ID_MISSING`);
+  const tab = await getTabOrNull(tabId);
+  if (!tab) throw new Error(`INITIAL_${role.toUpperCase()}_TAB_MISSING`);
+  if (tab.active) throw new Error(`INITIAL_${role.toUpperCase()}_TAB_BECAME_ACTIVE`);
+  if (tab.windowId !== materialization.windowId) throw new Error(`INITIAL_${role.toUpperCase()}_TAB_WINDOW_MISMATCH`);
+
+  const identityUrl = requireLoadedIdentity
+    ? tab.url
+    : isChatGptUrl(tab.url) ? tab.url : tab.pendingUrl;
+  if (!isChatGptUrl(identityUrl)) throw new Error(`INITIAL_${role.toUpperCase()}_TAB_NOT_CHATGPT`);
+  if (Bindings.conversationIdFromHref(identityUrl) !== binding?.conversationId) {
+    throw new Error(`INITIAL_${role.toUpperCase()}_CONVERSATION_MISMATCH`);
+  }
+  return tab;
+}
+
+async function createClaimedAgentTab({
+  windowId,
+  url,
+  claimValid,
+  recordCreated,
+  assertForeground,
+  stateChangedError,
+  invalidError,
+}) {
+  await assertFeatureEnabled();
+  const current = await getState();
+  if (!claimValid(current)) throw new Error(stateChangedError);
+
+  await assertFeatureEnabled();
+  const created = await chrome.tabs.create({ windowId, url, active: false });
+  let recorded = current;
+  if (typeof created?.id === "number") {
+    const latest = await getState();
+    recorded = await putState(recordCreated(latest, created));
+  }
+
+  const createdIsChatGpt = isChatGptUrl(created?.url) || isChatGptUrl(created?.pendingUrl);
+  if (typeof created?.id !== "number"
+      || created.active
+      || created.windowId !== windowId
+      || !createdIsChatGpt) {
+    throw new Error(invalidError);
+  }
+  await assertForeground(recorded);
+  return recorded;
 }
 
 async function sendPrompt(tabId, requestId, prompt, completionMarker) {
@@ -478,6 +619,9 @@ async function startWorkLoop(triggerTab, { userInitiated = false } = {}) {
     agentTabsCreatedThisRun: 0,
     generationCreatedFor: {},
     initialTask,
+    initialMaterialization: state.initialMaterialization
+      ? { ...state.initialMaterialization, phase: "COMPLETE", completedAt: Date.now() }
+      : null,
     latestDeveloperHandoff: null,
     latestAuditorVerdict: null,
     runId,
@@ -580,6 +724,8 @@ async function beginRollover(state) {
     targetGeneration: state.generation + 1,
     oldDeveloperTabId: state.developerTabId,
     oldAuditorTabId: state.auditorTabId,
+    oldDeveloperOwnership: state.agentTabOwnership?.developer ?? null,
+    oldAuditorOwnership: state.agentTabOwnership?.auditor ?? null,
     newDeveloperTabId: null,
     newAuditorTabId: null,
     developerReady: false,
@@ -658,7 +804,7 @@ async function claimRolloverTabCreation(state, role) {
 
 async function createRolloverTab(state, role) {
   await assertFeatureEnabled();
-  let claimed = await claimRolloverTabCreation(state, role);
+  const claimed = await claimRolloverTabCreation(state, role);
   const claimPhase = role === "developer" ? "DEVELOPER_CREATE_CLAIMED" : "AUDITOR_CREATE_CLAIMED";
   const nextPhase = role === "developer" ? "DEVELOPER_CREATED" : "WAITING_DEVELOPER_CONTENT";
   const tabField = role === "developer" ? "newDeveloperTabId" : "newAuditorTabId";
@@ -667,47 +813,41 @@ async function createRolloverTab(state, role) {
     : claimed.rolloverStatus.oldAuditorTabId;
   const oldTab = await getTabOrNull(oldTabId);
   if (!oldTab) throw new Error(`OLD_${role.toUpperCase()}_TAB_MISSING`);
+  const targetGeneration = claimed.rolloverStatus.targetGeneration;
 
-  const current = await getState();
-  if (current.runId !== claimed.runId
-      || current.status !== "ROLLOVER"
-      || current.rolloverStatus?.phase !== claimPhase) {
-    throw new Error(`ROLLOVER_${role.toUpperCase()}_CREATE_ABORTED_STATE_CHANGED`);
-  }
-
-  await assertFeatureEnabled();
-  const created = await chrome.tabs.create({
+  const recorded = await createClaimedAgentTab({
     windowId: oldTab.windowId,
     url: "https://chatgpt.com/",
-    active: false,
+    claimValid(current) {
+      return current.runId === claimed.runId
+        && current.status === "ROLLOVER"
+        && current.rolloverStatus?.phase === claimPhase;
+    },
+    recordCreated(latest, created) {
+      return addEvent({
+        ...latest,
+        rolloverStatus: {
+          ...latest.rolloverStatus,
+          phase: latest.status === "ROLLOVER" ? nextPhase : latest.rolloverStatus?.phase,
+          [tabField]: created.id,
+        },
+      }, "ROLLOVER_TAB_CREATED", {
+        role,
+        generation: targetGeneration,
+        tabId: created.id,
+        windowId: created.windowId,
+        active: created.active,
+      });
+    },
+    assertForeground: assertForegroundStable,
+    stateChangedError: `ROLLOVER_${role.toUpperCase()}_CREATE_ABORTED_STATE_CHANGED`,
+    invalidError: `NEW_${role.toUpperCase()}_TAB_CREATE_INVALID`,
   });
 
-  if (typeof created?.id === "number") {
-    const latest = await getState();
-    claimed = await putState(addEvent({
-      ...latest,
-      rolloverStatus: {
-        ...latest.rolloverStatus,
-        phase: latest.status === "ROLLOVER" ? nextPhase : latest.rolloverStatus?.phase,
-        [tabField]: created.id,
-      },
-    }, "ROLLOVER_TAB_CREATED", {
-      role,
-      generation: claimed.rolloverStatus.targetGeneration,
-      tabId: created.id,
-      windowId: created.windowId,
-      active: created.active,
-    }));
-  }
-
-  if (typeof created?.id !== "number" || created.active || created.windowId !== oldTab.windowId) {
-    throw new Error(`NEW_${role.toUpperCase()}_TAB_CREATE_INVALID`);
-  }
-  if (claimed.status !== "ROLLOVER") {
+  if (recorded.status !== "ROLLOVER") {
     throw new Error(`ROLLOVER_${role.toUpperCase()}_CREATE_FINISHED_AFTER_TERMINAL`);
   }
-  await assertForegroundStable(claimed);
-  return claimed;
+  return recorded;
 }
 
 async function dispatchBootstrap(state, role) {
@@ -782,6 +922,7 @@ async function performAtomicSwitch(state) {
     ...state,
     developerTabId: developer.id,
     auditorTabId: auditor.id,
+    agentTabOwnership: { developer: "managed", auditor: "managed" },
     generation: targetGeneration,
     round: 1,
     status: "DEVELOPING",
@@ -814,6 +955,19 @@ async function performAtomicSwitch(state) {
   await dispatchDeveloper(switched, { rolloverContinuation: true });
 }
 
+async function closeRetiredManagedTabsOnce(tabIds) {
+  for (const tabId of tabIds) {
+    if (typeof tabId !== "number" || !(await getTabOrNull(tabId))) continue;
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch (error) {
+      await fail(`OLD_AGENT_TAB_CLOSE_FAILED: ${tabId}: ${error.message}`);
+      return false;
+    }
+  }
+  return true;
+}
+
 async function closeOldAgentTabsAfterSend() {
   let state = await getState();
   const rollover = state.rolloverStatus;
@@ -828,16 +982,11 @@ async function closeOldAgentTabsAfterSend() {
     continuationRequestId: rollover.continuationRequestId,
   }));
 
-  for (const tabId of [rollover.oldDeveloperTabId, rollover.oldAuditorTabId]) {
-    if (await getTabOrNull(tabId)) {
-      try {
-        await chrome.tabs.remove(tabId);
-      } catch (error) {
-        await fail(`OLD_AGENT_TAB_CLOSE_FAILED: ${tabId}: ${error.message}`);
-        return;
-      }
-    }
-  }
+  const closed = await closeRetiredManagedTabsOnce([
+    rollover.oldDeveloperOwnership === "managed" ? rollover.oldDeveloperTabId : null,
+    rollover.oldAuditorOwnership === "managed" ? rollover.oldAuditorTabId : null,
+  ]);
+  if (!closed) return;
 
   state = await getState();
   if (state.status === "FAILED") return;
@@ -1203,6 +1352,14 @@ async function onTurnSent(message, sender) {
   }));
 
   if (state.expected.role === "developer"
+      && state.initialMaterialization?.phase === "COMPLETE"
+      && !state.initialMaterialization.retiredTabsClosed) {
+    await serializeInitialMaterialization(closeInitialRetiredManagedTabsAfterSend);
+    state = await getState();
+    if (state.status === "FAILED") return;
+  }
+
+  if (state.expected.role === "developer"
       && state.rolloverStatus?.phase === "SWITCHED_WAITING_DEVELOPER_SEND"
       && state.rolloverStatus.continuationRequestId === message.requestId) {
     await closeOldAgentTabsAfterSend();
@@ -1362,6 +1519,380 @@ async function onTurnComplete(message, sender) {
   await dispatchDeveloper(state);
 }
 
+function initialBindingsForStart(state) {
+  const bindings = Bindings.normalizeBindings(state.bindings);
+  if (!bindings.developer && !bindings.auditor) return null;
+  if (!bindings.developer || !bindings.auditor) throw new Error("INITIAL_BINDINGS_MISSING");
+  if (bindings.developer.conversationId === bindings.auditor.conversationId) {
+    throw new Error("INITIAL_BINDINGS_MUST_DIFFER");
+  }
+  return bindings;
+}
+
+async function beginInitialMaterialization(state, triggerTab, initialForeground, bindings, config) {
+  const retiredDeveloperTabId = state.agentTabOwnership?.developer === "managed" ? state.developerTabId : null;
+  const retiredAuditorTabId = state.agentTabOwnership?.auditor === "managed" ? state.auditorTabId : null;
+  return putState(addEvent({
+    ...state,
+    status: null,
+    expected: null,
+    error: null,
+    initialTask: config.task,
+    maxRounds: config.maxRounds,
+    maxGenerations: config.maxGenerations,
+    initialMaterialization: {
+      phase: "PREPARED",
+      triggerTabId: triggerTab.id,
+      windowId: triggerTab.windowId,
+      initialForeground,
+      developerBinding: bindings.developer,
+      auditorBinding: bindings.auditor,
+      developerTabId: null,
+      auditorTabId: null,
+      developerReady: false,
+      auditorReady: false,
+      createCount: 0,
+      retiredDeveloperTabId,
+      retiredAuditorTabId,
+      retiredTabsClosed: retiredDeveloperTabId == null && retiredAuditorTabId == null,
+    },
+  }, "INITIAL_MATERIALIZATION_PREPARED", {
+    triggerTabId: triggerTab.id,
+    windowId: triggerTab.windowId,
+    developerConversationId: bindings.developer.conversationId,
+    auditorConversationId: bindings.auditor.conversationId,
+    retiredDeveloperTabId,
+    retiredAuditorTabId,
+  }));
+}
+
+async function claimInitialTabCreation(state, role) {
+  const materialization = state.initialMaterialization;
+  const expectedPhase = role === "developer" ? "PREPARED" : "DEVELOPER_CREATED";
+  const claimedPhase = role === "developer" ? "DEVELOPER_CREATE_CLAIMED" : "AUDITOR_CREATE_CLAIMED";
+  const tabField = role === "developer" ? "developerTabId" : "auditorTabId";
+  const expectedCreateCount = role === "developer" ? 0 : 1;
+  if (!isInitialMaterializationPending(state)
+      || !materialization
+      || materialization.phase !== expectedPhase
+      || materialization[tabField] != null
+      || materialization.createCount !== expectedCreateCount) {
+    throw new Error(`INITIAL_${role.toUpperCase()}_CREATE_NOT_ALLOWED`);
+  }
+  return putState(addEvent({
+    ...state,
+    initialMaterialization: {
+      ...materialization,
+      phase: claimedPhase,
+      createCount: expectedCreateCount + 1,
+    },
+  }, "INITIAL_TAB_CREATE_CLAIMED", {
+    role,
+    createCount: expectedCreateCount + 1,
+  }));
+}
+
+async function createInitialMaterializedTab(state, role) {
+  const materialization = state.initialMaterialization;
+  if (!materialization) throw new Error("INITIAL_MATERIALIZATION_STATE_MISSING");
+  const claimPhase = role === "developer" ? "DEVELOPER_CREATE_CLAIMED" : "AUDITOR_CREATE_CLAIMED";
+  const nextPhase = role === "developer" ? "DEVELOPER_CREATED" : "WAITING_READY";
+  const tabField = role === "developer" ? "developerTabId" : "auditorTabId";
+  const binding = role === "developer" ? materialization.developerBinding : materialization.auditorBinding;
+  const expectedCreateCount = role === "developer" ? 1 : 2;
+  const flight = {
+    role,
+    windowId: materialization.windowId,
+    conversationId: binding.conversationId,
+    readyTabId: null,
+  };
+  initialCreateInFlight = flight;
+
+  let recorded;
+  try {
+    recorded = await createClaimedAgentTab({
+      windowId: materialization.windowId,
+      url: binding.href,
+      claimValid(current) {
+        const currentMaterialization = current.initialMaterialization;
+        return isInitialMaterializationPending(current)
+          && currentMaterialization?.phase === claimPhase
+          && currentMaterialization?.triggerTabId === materialization.triggerTabId
+          && currentMaterialization?.[tabField] == null
+          && currentMaterialization?.createCount === expectedCreateCount;
+      },
+      recordCreated(latest, created) {
+        const latestMaterialization = latest.initialMaterialization;
+        return addEvent({
+          ...latest,
+          initialMaterialization: {
+            ...latestMaterialization,
+            phase: TERMINAL_STATUSES.has(latest.status) ? latestMaterialization?.phase : nextPhase,
+            [tabField]: created.id,
+          },
+        }, "INITIAL_TAB_CREATED", {
+          role,
+          tabId: created.id,
+          windowId: created.windowId,
+          active: created.active,
+          conversationId: binding.conversationId,
+        });
+      },
+      assertForeground: assertInitialForegroundStable,
+      stateChangedError: `INITIAL_${role.toUpperCase()}_CREATE_ABORTED_STATE_CHANGED`,
+      invalidError: `INITIAL_${role.toUpperCase()}_TAB_CREATE_INVALID`,
+    });
+
+    if (flight.readyTabId != null) {
+      recorded = await persistEarlyInitialContentReady(await getState(), role, flight.readyTabId);
+    }
+  } finally {
+    if (initialCreateInFlight === flight) initialCreateInFlight = null;
+  }
+
+  if (TERMINAL_STATUSES.has(recorded.status)) {
+    throw new Error(`INITIAL_${role.toUpperCase()}_CREATE_FINISHED_AFTER_TERMINAL`);
+  }
+  return recorded;
+}
+
+async function finishInitialMaterialization(state) {
+  const materialization = state.initialMaterialization;
+  if (!materialization?.developerReady || !materialization?.auditorReady) return;
+  let developer;
+  let auditor;
+  try {
+    developer = await requireInitialMaterializedTab(state, "developer");
+    auditor = await requireInitialMaterializedTab(state, "auditor");
+    await assertInitialForegroundStable(state);
+  } catch (error) {
+    await fail(error.message);
+    return;
+  }
+  const triggerTab = await getTabOrNull(materialization.triggerTabId);
+  if (!isChatGptTab(triggerTab)) {
+    await fail("INITIAL_TRIGGER_TAB_MISSING_OR_INVALID");
+    return;
+  }
+
+  const assigned = await putState(addEvent({
+    ...state,
+    developerTabId: developer.id,
+    auditorTabId: auditor.id,
+    agentTabOwnership: { developer: "managed", auditor: "managed" },
+    initialMaterialization: {
+      ...materialization,
+      phase: "ASSIGNED",
+      assignedAt: Date.now(),
+    },
+  }, "INITIAL_MATERIALIZATION_ASSIGNED", {
+    developerTabId: developer.id,
+    auditorTabId: auditor.id,
+  }));
+  await setActionTitle(assigned);
+  await startWorkLoop(triggerTab, { userInitiated: true });
+}
+
+async function resumeInitialMaterialization({ allowCreate = false } = {}) {
+  if (!(await isFeatureEnabled())) return;
+  let state = await getState();
+  if (!isInitialMaterializationPending(state)) return;
+  try {
+    await assertInitialForegroundStable(state);
+  } catch (error) {
+    await fail(error.message);
+    return;
+  }
+
+  const phase = state.initialMaterialization?.phase;
+  if (phase === "PREPARED") {
+    if (!allowCreate) return;
+    try {
+      state = await claimInitialTabCreation(state, "developer");
+      state = await createInitialMaterializedTab(state, "developer");
+    } catch (error) {
+      await fail(`INITIAL_DEVELOPER_CREATE_FAILED: ${error.message}`);
+      return;
+    }
+    await resumeInitialMaterialization({ allowCreate: true });
+    return;
+  }
+
+  if (phase === "DEVELOPER_CREATE_CLAIMED" || phase === "AUDITOR_CREATE_CLAIMED") return;
+
+  if (phase === "DEVELOPER_CREATED") {
+    try {
+      await requireInitialMaterializedTab(state, "developer", { requireLoadedIdentity: false });
+    } catch (error) {
+      await fail(error.message);
+      return;
+    }
+    if (!allowCreate) return;
+    try {
+      state = await claimInitialTabCreation(await getState(), "auditor");
+      state = await createInitialMaterializedTab(state, "auditor");
+    } catch (error) {
+      await fail(`INITIAL_AUDITOR_CREATE_FAILED: ${error.message}`);
+      return;
+    }
+    await resumeInitialMaterialization();
+    return;
+  }
+
+  if (phase === "WAITING_READY") {
+    try {
+      await requireInitialMaterializedTab(state, "developer", { requireLoadedIdentity: false });
+      await requireInitialMaterializedTab(state, "auditor", { requireLoadedIdentity: false });
+      await assertInitialForegroundStable(state);
+    } catch (error) {
+      await fail(error.message);
+      return;
+    }
+    if (!state.initialMaterialization.developerReady || !state.initialMaterialization.auditorReady) return;
+    state = await putState(addEvent({
+      ...state,
+      initialMaterialization: { ...state.initialMaterialization, phase: "READY_BOTH" },
+    }, "INITIAL_MATERIALIZATION_READY"));
+    await finishInitialMaterialization(state);
+    return;
+  }
+
+  if (phase === "READY_BOTH" || phase === "ASSIGNED") {
+    await finishInitialMaterialization(state);
+  }
+}
+
+async function markInitialContentReady(state, tabId) {
+  const role = initialMaterializationRoleForTab(state, tabId);
+  if (!role || !isInitialMaterializationPending(state)) return false;
+  try {
+    await requireInitialMaterializedTab(state, role);
+    await assertInitialForegroundStable(state);
+  } catch (error) {
+    await fail(error.message);
+    return true;
+  }
+  const readyField = role === "developer" ? "developerReady" : "auditorReady";
+  const latest = await getState();
+  if (!isInitialMaterializationPending(latest)
+      || initialMaterializationRoleForTab(latest, tabId) !== role) return true;
+  if (!latest.initialMaterialization[readyField]) {
+    await putState(addEvent({
+      ...latest,
+      initialMaterialization: {
+        ...latest.initialMaterialization,
+        [readyField]: true,
+      },
+    }, "INITIAL_CONTENT_READY", { role, tabId }));
+  }
+  await resumeInitialMaterialization();
+  return true;
+}
+
+async function restoreInitialMaterializationSafely(state) {
+  if (!(await isFeatureEnabled())) return;
+  let materialization = state.initialMaterialization;
+  if (!materialization || TERMINAL_STATUSES.has(state.status) || materialization.phase === "COMPLETE") return;
+
+  if (materialization.phase === "DEVELOPER_CREATE_CLAIMED") {
+    if (typeof materialization.developerTabId !== "number") {
+      await fail("INITIAL_DEVELOPER_CREATE_INTERRUPTED_NO_RETRY");
+      return;
+    }
+    try {
+      await requireInitialMaterializedTab(state, "developer", { requireLoadedIdentity: false });
+      state = await putState({
+        ...state,
+        initialMaterialization: { ...materialization, phase: "DEVELOPER_CREATED" },
+      });
+      materialization = state.initialMaterialization;
+    } catch (error) {
+      await fail(error.message);
+      return;
+    }
+  }
+
+  if (materialization.phase === "AUDITOR_CREATE_CLAIMED") {
+    if (typeof materialization.auditorTabId !== "number") {
+      await fail("INITIAL_AUDITOR_CREATE_INTERRUPTED_NO_RETRY");
+      return;
+    }
+    try {
+      await requireInitialMaterializedTab(state, "developer", { requireLoadedIdentity: false });
+      await requireInitialMaterializedTab(state, "auditor", { requireLoadedIdentity: false });
+      state = await putState({
+        ...state,
+        initialMaterialization: { ...materialization, phase: "WAITING_READY" },
+      });
+    } catch (error) {
+      await fail(error.message);
+      return;
+    }
+  }
+
+  await resumeInitialMaterialization({ allowCreate: true });
+}
+
+async function closeInitialRetiredManagedTabsAfterSend() {
+  let state = await getState();
+  const materialization = state.initialMaterialization;
+  if (!materialization || materialization.phase !== "COMPLETE" || materialization.retiredTabsClosed) return;
+
+  const closed = await closeRetiredManagedTabsOnce([
+    materialization.retiredDeveloperTabId,
+    materialization.retiredAuditorTabId,
+  ]);
+  if (!closed) return;
+
+  state = await getState();
+  if (state.status === "FAILED") return;
+  const latest = state.initialMaterialization;
+  if (!latest || latest.retiredTabsClosed) return;
+  await putState(addEvent({
+    ...state,
+    initialMaterialization: {
+      ...latest,
+      retiredTabsClosed: true,
+      retiredTabsClosedAt: Date.now(),
+    },
+  }, "INITIAL_RETIRED_TABS_CLOSED", {
+    retiredDeveloperTabId: latest.retiredDeveloperTabId,
+    retiredAuditorTabId: latest.retiredAuditorTabId,
+  }));
+}
+
+function shouldCleanupPreviousTerminalInitialMaterialization(state) {
+  return (state.status === "FAILED" || state.status === "STOPPED_USER")
+    && state.initialMaterialization != null
+    && state.initialMaterialization.phase !== "COMPLETE";
+}
+
+async function cleanupPreviousTerminalInitialMaterializationBeforeStart(state) {
+  if (!shouldCleanupPreviousTerminalInitialMaterialization(state)) return state;
+  const materialization = state.initialMaterialization;
+  const closed = await closeRetiredManagedTabsOnce([
+    materialization.developerTabId,
+    materialization.auditorTabId,
+  ]);
+  if (closed) return getState();
+
+  const latest = await getState();
+  const reason = "PREVIOUS_INITIAL_MATERIALIZATION_CLEANUP_FAILED";
+  const failed = await putState(addEvent({
+    ...latest,
+    status: "FAILED",
+    expected: null,
+    error: reason,
+  }, "FAILED", {
+    reason,
+    phase: "PRE_START_INITIAL_CLEANUP",
+    developerTabId: materialization.developerTabId,
+    auditorTabId: materialization.auditorTabId,
+  }));
+  await setActionTitle(failed);
+  throw new Error(reason);
+}
+
 async function getPublicUiState() {
   const state = await getState();
   const [developer, auditor] = await Promise.all([
@@ -1380,7 +1911,7 @@ async function getPublicUiState() {
     maxGenerations: Number.isInteger(state.maxGenerations) && state.maxGenerations > 0
       ? state.maxGenerations
       : DEFAULT_MAX_GENERATIONS,
-    running: RUNNING_STATUSES.has(state.status),
+    running: RUNNING_STATUSES.has(state.status) || isInitialMaterializationPending(state),
     bindings: Bindings.normalizeBindings(state.bindings),
   };
 }
@@ -1407,7 +1938,11 @@ async function assignAgent(role, tabId) {
   const otherTabId = role === "developer" ? state.auditorTabId : state.developerTabId;
   if (tab.id === otherTabId) throw new Error("DEVELOPER_AND_AUDITOR_MUST_DIFFER");
   const field = role === "developer" ? "developerTabId" : "auditorTabId";
-  const next = await putState({ ...state, [field]: tab.id });
+  const next = await putState({
+    ...state,
+    [field]: tab.id,
+    agentTabOwnership: { ...state.agentTabOwnership, [role]: "external" },
+  });
   await setActionTitle(next);
   return getPublicUiState();
 }
@@ -1420,19 +1955,39 @@ async function startFromUi({ task, maxRounds, maxGenerations, triggerTabId }) {
   if (!Number.isInteger(maxGenerations) || maxGenerations < 1) throw new Error("MAX_GENERATIONS_INVALID");
 
   let state = await getState();
-  if (RUNNING_STATUSES.has(state.status)) throw new Error("RUN_ALREADY_ACTIVE");
-  if (!state.developerTabId || !state.auditorTabId) throw new Error("AGENTS_MISSING");
-  const triggerTab = await getTabOrNull(triggerTabId);
-  if (!triggerTab) throw new Error("TRIGGER_TAB_MISSING");
-  if (triggerTab.id === state.developerTabId || triggerTab.id === state.auditorTabId) {
-    throw new Error("START_FROM_NON_AGENT_TAB");
+  if (RUNNING_STATUSES.has(state.status) || isInitialMaterializationPending(state)) {
+    throw new Error("RUN_ALREADY_ACTIVE");
   }
-
-  const { developer, auditor } = await readAgentTabs(state);
+  const triggerTab = await getTabOrNull(triggerTabId);
+  if (!isChatGptTab(triggerTab)) throw new Error("TRIGGER_TAB_MISSING_OR_INVALID");
   const initial = await captureForeground(triggerTab.windowId);
   if (!initial.focused || initial.focusedWindowId !== triggerTab.windowId || initial.activeTabId !== triggerTab.id) {
     throw new Error("TRIGGER_TAB_NOT_FOREGROUND");
   }
+
+  const bindings = initialBindingsForStart(state);
+  if (bindings) {
+    await serializeInitialMaterialization(async () => {
+      let latest = await getState();
+      if (RUNNING_STATUSES.has(latest.status) || isInitialMaterializationPending(latest)) {
+        throw new Error("RUN_ALREADY_ACTIVE");
+      }
+      latest = await cleanupPreviousTerminalInitialMaterializationBeforeStart(latest);
+      state = await beginInitialMaterialization(latest, triggerTab, initial, bindings, {
+        task: cleanTask,
+        maxRounds,
+        maxGenerations,
+      });
+      await resumeInitialMaterialization({ allowCreate: true });
+    });
+    return getPublicUiState();
+  }
+
+  if (!state.developerTabId || !state.auditorTabId) throw new Error("AGENTS_MISSING");
+  if (triggerTab.id === state.developerTabId || triggerTab.id === state.auditorTabId) {
+    throw new Error("START_FROM_NON_AGENT_TAB");
+  }
+  const { developer, auditor } = await readAgentTabs(state);
   const sameWindow = developer.windowId === auditor.windowId && auditor.windowId === triggerTab.windowId;
   if (sameWindow && (developer.active || auditor.active)) throw new Error("AGENT_TAB_ACTIVE_AT_START");
 
@@ -1448,7 +2003,7 @@ async function startFromUi({ task, maxRounds, maxGenerations, triggerTabId }) {
 
 async function stopUser() {
   const state = await getState();
-  if (!RUNNING_STATUSES.has(state.status)) return getPublicUiState();
+  if (!RUNNING_STATUSES.has(state.status) && !isInitialMaterializationPending(state)) return getPublicUiState();
   let after = null;
   if (state.smoke?.foregroundWindowId) {
     try {
@@ -1531,10 +2086,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void onTurnFailed(message, sender);
   } else if (message?.type === "CONTENT_READY") {
     void (async () => {
-    if (!(await isFeatureEnabled())) return;
+      if (!(await isFeatureEnabled())) return;
       const state = await getState();
       const tabId = sender.tab?.id;
-      if (state.status !== "ROLLOVER" || typeof tabId !== "number") return;
+      if (typeof tabId !== "number") return;
+      if (captureEarlyInitialContentReady(state, sender.tab)) return;
+      if (initialMaterializationRoleForTab(state, tabId)) {
+        await serializeInitialMaterialization(async () => {
+          await markInitialContentReady(await getState(), tabId);
+        });
+        return;
+      }
+      if (state.status !== "ROLLOVER") return;
       if (tabId !== state.rolloverStatus?.newDeveloperTabId && tabId !== state.rolloverStatus?.newAuditorTabId) return;
       await resumeRollover();
     })();
@@ -1546,6 +2109,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   void (async () => {
     if (!(await isFeatureEnabled())) return;
     const state = await getState();
+    if (initialMaterializationRoleForTab(state, tabId)) {
+      await serializeInitialMaterialization(async () => {
+        await resumeInitialMaterialization();
+      });
+      return;
+    }
     if (state.status !== "ROLLOVER") return;
     if (tabId !== state.rolloverStatus?.newDeveloperTabId && tabId !== state.rolloverStatus?.newAuditorTabId) return;
     await resumeRollover();
@@ -1556,6 +2125,12 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   void (async () => {
     if (!(await isFeatureEnabled())) return;
     const state = await getState();
+    if (isInitialMaterializationPending(state)) {
+      const initialWindowId = state.initialMaterialization.initialForeground?.focusedWindowId;
+      if (windowId === chrome.windows.WINDOW_ID_NONE || windowId === initialWindowId) return;
+      await fail(`FOCUSED_WINDOW_CHANGED: ${windowId}`);
+      return;
+    }
     if (!RUNNING_STATUSES.has(state.status) || !state.smoke) return;
     const withEvent = await putState(addEvent(state, "WINDOW_FOCUS", { windowId }));
     if (windowId === chrome.windows.WINDOW_ID_NONE || windowId === state.smoke.initial.focusedWindowId) return;
@@ -1571,6 +2146,12 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
   void (async () => {
     if (!(await isFeatureEnabled())) return;
     const state = await getState();
+    if (isInitialMaterializationPending(state)) {
+      const materialization = state.initialMaterialization;
+      if (activeInfo.windowId !== materialization.windowId || activeInfo.tabId === materialization.triggerTabId) return;
+      await fail(`FOREGROUND_ACTIVE_TAB_CHANGED: ${activeInfo.tabId}`);
+      return;
+    }
     if (!RUNNING_STATUSES.has(state.status) || !state.smoke) return;
     let next = await putState(addEvent(state, "TAB_ACTIVATED", {
       tabId: activeInfo.tabId,
@@ -1591,6 +2172,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (!(await isFeatureEnabled())) return;
     const state = await getState();
     const rollover = state.rolloverStatus;
+    const initialRole = initialMaterializationRoleForTab(state, tabId);
+
+    if (initialRole && isInitialMaterializationPending(state)) {
+      await fail(`INITIAL_${initialRole.toUpperCase()}_TAB_CLOSED: ${tabId}`);
+      return;
+    }
 
     if (state.status === "ROLLOVER"
         && (tabId === rollover?.newDeveloperTabId || tabId === rollover?.newAuditorTabId)) {
@@ -1612,6 +2199,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       ...state,
       developerTabId: tabId === state.developerTabId ? null : state.developerTabId,
       auditorTabId: tabId === state.auditorTabId ? null : state.auditorTabId,
+      agentTabOwnership: {
+        developer: tabId === state.developerTabId ? null : state.agentTabOwnership?.developer ?? null,
+        auditor: tabId === state.auditorTabId ? null : state.agentTabOwnership?.auditor ?? null,
+      },
       status: null,
       round: 0,
       latestDeveloperHandoff: null,
@@ -1637,7 +2228,10 @@ void (async () => {
       rolloverPhase: state.rolloverStatus?.phase ?? null,
     });
   }
-  await restoreRolloverSafely(state);
+  await serializeInitialMaterialization(async () => {
+    await restoreInitialMaterializationSafely(await getState());
+  });
+  await restoreRolloverSafely(await getState());
 })();
 
 

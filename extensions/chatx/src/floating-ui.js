@@ -449,11 +449,12 @@
 
   function updateStartEnabled() {
     const taskReady = $("task").value.trim().length > 0;
+    const bindingsReady = Boolean(currentState?.bindings?.developer && currentState?.bindings?.auditor);
+    const agentsReady = Boolean(currentState?.developerAssigned && currentState?.auditorAssigned);
     $("start").disabled = !features.agentBridge
       || !currentState
       || currentState.running
-      || !currentState.developerAssigned
-      || !currentState.auditorAssigned
+      || (!bindingsReady && !agentsReady)
       || !taskReady;
   }
 
