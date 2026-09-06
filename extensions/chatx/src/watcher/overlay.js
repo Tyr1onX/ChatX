@@ -24,9 +24,13 @@ function renderOverlayLanguage(host, language) {
 }
 
 function showOverlay({ runId, title, language }) {
-  if (!runId) return false;
+  if (!runId) return { shown: false, occupiedRunId: null };
 
-  removeOverlay();
+  const current = document.getElementById(HOST_ID);
+  if (current) {
+    const occupiedRunId = current.dataset.chatxRunId || null;
+    return { shown: occupiedRunId === runId, occupiedRunId };
+  }
 
   const Prefs = globalThis.ChatXUiPrefs;
   const host = document.createElement("div");
@@ -213,8 +217,16 @@ function showOverlay({ runId, title, language }) {
   card.append(terminal, close, actions);
   shadow.append(style, card);
   document.documentElement.append(host);
-  return true;
+  return { shown: true, occupiedRunId: runId };
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") removeOverlay();
+}, { passive: true });
+window.addEventListener("blur", () => removeOverlay(), { passive: true });
+window.addEventListener("focus", () => {
+  void chrome.runtime.sendMessage({ type: "PRESENT_PENDING_COMPLETION" }).catch(() => undefined);
+}, { passive: true });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
@@ -237,10 +249,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       globalThis.ChatXFeatures.get(),
       globalThis.ChatXUiPrefs.get(),
     ]).then(([features, uiPrefs]) => {
-      const shown = features.watcher
+      const result = features.watcher
         ? showOverlay({ runId: message.runId, title: message.title, language: uiPrefs.language })
-        : false;
-      sendResponse({ shown, runId: message.runId ?? null });
+        : { shown: false, occupiedRunId: null };
+      sendResponse({ ...result, runId: message.runId ?? null });
     });
     return true;
   }

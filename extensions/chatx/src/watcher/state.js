@@ -44,10 +44,6 @@ export function getPendingDoneRuns(state) {
     .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
 }
 
-export function getUnpresentedDoneRuns(state) {
-  return getPendingDoneRuns(state).filter((run) => run.presentedAt == null);
-}
-
 function mergeMetadata(run, metadata) {
   if (metadata.tabId !== undefined) run.tabId = metadata.tabId;
   if (metadata.windowId !== undefined) run.windowId = metadata.windowId;
@@ -81,7 +77,6 @@ export function startRun(state, metadata, now, runId) {
     lastMutationAt: metadata.lastMutationAt ?? now,
     completedAt: null,
     acknowledgedAt: null,
-    presentedAt: null,
     tabId: metadata.tabId ?? null,
     windowId: metadata.windowId ?? null,
     url: metadata.url ?? "",
@@ -136,7 +131,7 @@ export function canConfirmFinish(run, signals, now) {
 export function confirmDone(state, runId, metadata, now) {
   const run = getRun(state, runId);
   if (!canConfirmFinish(run, metadata.signals, now)) {
-    return { run, completed: false, shouldPresent: false };
+    return { run, completed: false };
   }
 
   run.state = RunState.DONE;
@@ -144,35 +139,18 @@ export function confirmDone(state, runId, metadata, now) {
   run.lastMutationAt = metadata.lastMutationAt ?? run.lastMutationAt;
   mergeMetadata(run, metadata);
 
-  const shouldPresent = run.presentedAt == null;
-  return { run, completed: true, shouldPresent };
+  return { run, completed: true };
 }
 
-export function markRunPresented(state, runId, now) {
+export function acknowledgeRun(state, runId, now) {
   const run = getRun(state, runId);
-  if (!run || run.state !== RunState.DONE || run.presentedAt != null) return null;
-  run.presentedAt = now;
-  return run;
-}
-
-export function acknowledgeRun(state, conversationId, now) {
-  const pending = state.runs.filter(
-    (run) => run.conversationId === conversationId && run.state === RunState.DONE
-  );
-  if (pending.length === 0) {
-    return { run: getCurrentRun(state, conversationId), acknowledged: false, runIds: [] };
+  if (!run || run.state !== RunState.DONE) {
+    return { run, acknowledged: false };
   }
 
-  for (const run of pending) {
-    run.state = RunState.ACKNOWLEDGED;
-    run.acknowledgedAt = now;
-  }
-  pending.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
-  return {
-    run: pending[0],
-    acknowledged: true,
-    runIds: pending.map((run) => run.runId),
-  };
+  run.state = RunState.ACKNOWLEDGED;
+  run.acknowledgedAt = now;
+  return { run, acknowledged: true };
 }
 
 export function cleanupWatcherState(

@@ -8,9 +8,7 @@ import {
   createEmptyWatcherState,
   getPendingDoneRuns,
   getRun,
-  getUnpresentedDoneRuns,
   markFinishCandidate,
-  markRunPresented,
   normalizeWatcherState,
   recordActivity,
   startRun,
@@ -74,16 +72,19 @@ async function getFocusedActiveTab() {
 }
 
 async function sendOverlay(tab, run) {
-  if (!isEligibleOverlayTab(tab)) return false;
+  if (!isEligibleOverlayTab(tab)) return { shown: false, occupiedRunId: null };
   try {
     const response = await chrome.tabs.sendMessage(tab.id, {
       type: "SHOW_COMPLETION_OVERLAY",
       runId: run.runId,
       title: run.title?.trim() || "ChatGPT 对话",
     });
-    return response?.shown === true;
+    return {
+      shown: response?.shown === true,
+      occupiedRunId: typeof response?.occupiedRunId === "string" ? response.occupiedRunId : null,
+    };
   } catch {
-    return false;
+    return { shown: false, occupiedRunId: null };
   }
 }
 
@@ -91,19 +92,25 @@ async function tryPresentPendingCompletionNow() {
   if (!(await isEnabled())) return { presented: false, reason: "disabled" };
 
   const state = await loadState();
-  const run = getUnpresentedDoneRuns(state)[0] ?? null;
+  const run = getPendingDoneRuns(state)[0] ?? null;
   if (!run) return { presented: false, reason: "none" };
 
   const tab = await getFocusedActiveTab();
   if (!tab) return { presented: false, reason: "no_eligible_active_tab", runId: run.runId };
 
-  const shown = await sendOverlay(tab, run);
-  if (!shown) return { presented: false, reason: "overlay_unavailable", runId: run.runId };
+  let overlay = await sendOverlay(tab, run);
+  if (!overlay.shown && overlay.occupiedRunId) {
+    const occupiedRun = getRun(state, overlay.occupiedRunId);
+    if (!occupiedRun || occupiedRun.state !== RunState.DONE) {
+      await hideOverlay(tab.id, overlay.occupiedRunId);
+      overlay = await sendOverlay(tab, run);
+    }
+  }
+  if (!overlay.shown) {
+    return { presented: false, reason: "overlay_unavailable", runId: run.runId };
+  }
 
-  const marked = markRunPresented(state, run.runId, Date.now());
-  if (marked) await persistState();
-
-  return { presented: Boolean(marked), runId: run.runId, tabId: tab.id };
+  return { presented: true, runId: run.runId, tabId: tab.id };
 }
 
 async function tryPresentPendingCompletion() {
@@ -185,9 +192,7 @@ async function handleFinishConfirmed(message, sender) {
   cleanupWatcherState(state, Date.now());
   await persistState();
 
-  const presentation = result.shouldPresent
-    ? await tryPresentPendingCompletion()
-    : { presented: false };
+  const presentation = await tryPresentPendingCompletion();
 
   return {
     completed: true,
@@ -197,9 +202,9 @@ async function handleFinishConfirmed(message, sender) {
   };
 }
 
-async function acknowledgeConversation(conversationId) {
+async function acknowledgeCompletion(runId) {
   const state = await loadState();
-  const result = acknowledgeRun(state, conversationId, Date.now());
+  const result = acknowledgeRun(state, runId, Date.now());
   if (result.acknowledged) await persistState();
   return result;
 }
@@ -219,7 +224,20 @@ async function handleAcknowledge(message, sender) {
   }
   if (!windowInfo.focused) return { acknowledged: false };
 
-  const result = await acknowledgeConversation(metadata.conversationId);
+  await tryPresentPendingCompletion();
+
+  const state = await loadState();
+  const run = getPendingDoneRuns(state).find(
+    (candidate) => candidate.conversationId === metadata.conversationId
+  ) ?? null;
+  if (!run) return { acknowledged: false, runId: null, state: null };
+
+  const result = await acknowledgeCompletion(run.runId);
+  if (result.acknowledged) {
+    await hideOverlay(sender.tab.id, run.runId);
+    await tryPresentPendingCompletion();
+  }
+
   return {
     acknowledged: result.acknowledged,
     runId: result.run?.runId ?? null,
@@ -304,9 +322,11 @@ async function handleOpenCompletion(message, sender) {
     return { viewed: false, acknowledged: false, remaining: getPendingDoneRuns(state).length };
   }
 
-  const result = await acknowledgeConversation(run.conversationId);
+  const result = await acknowledgeCompletion(run.runId);
   if (result.acknowledged) {
     await hideOverlay(sender.tab?.id, run.runId);
+    if (tab.id !== sender.tab?.id) await hideOverlay(tab.id, run.runId);
+    await tryPresentPendingCompletion();
   }
 
   return {
@@ -334,6 +354,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return registerConversation();
       case "GET_STATUS":
         return getStatus();
+      case "PRESENT_PENDING_COMPLETION":
+        return tryPresentPendingCompletion();
       case "OPEN_COMPLETION":
         return handleOpenCompletion(message, sender);
       default:
@@ -356,18 +378,21 @@ async function requestAckCheck(tabId) {
   }
 }
 
+async function handleForegroundChange(tabId) {
+  await tryPresentPendingCompletion();
+  await requestAckCheck(tabId);
+}
+
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void requestAckCheck(tabId);
-  void tryPresentPendingCompletion();
+  void handleForegroundChange(tabId);
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
   void chrome.tabs
     .query({ active: true, windowId })
-    .then((tabs) => requestAckCheck(tabs[0]?.id))
+    .then((tabs) => handleForegroundChange(tabs[0]?.id))
     .catch(() => undefined);
-  void tryPresentPendingCompletion();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

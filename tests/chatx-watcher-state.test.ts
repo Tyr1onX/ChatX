@@ -8,9 +8,7 @@ import {
   confirmDone,
   createEmptyWatcherState,
   getPendingDoneRuns,
-  getUnpresentedDoneRuns,
   markFinishCandidate,
-  markRunPresented,
   recordActivity,
   reduceIgnoredUiEvent,
   startRun,
@@ -62,15 +60,15 @@ function completeRun(state, runId, startedAt = 1000) {
 }
 
 describe("ChatX Watcher run state machine", () => {
-  it("CASE 1: RUNNING -> stable -> DONE requests presentation exactly once", () => {
+  it("CASE 1: RUNNING -> stable -> DONE enters the pending completion queue exactly once", () => {
     const state = createEmptyWatcherState();
     const started = startRun(state, baseMetadata, 1000, "run-1");
     expect(started.run.state).toBe(RunState.RUNNING);
 
     const first = completeRun(state, "run-1");
     expect(first.completed).toBe(true);
-    expect(first.shouldPresent).toBe(true);
     expect(first.run?.state).toBe(RunState.DONE);
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
 
     const second = confirmDone(
       state,
@@ -79,7 +77,7 @@ describe("ChatX Watcher run state machine", () => {
       9000
     );
     expect(second.completed).toBe(false);
-    expect(second.shouldPresent).toBe(false);
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
   });
 
   it("CASE 2: DOM rerender after DONE cannot create a duplicate completion", () => {
@@ -115,43 +113,41 @@ describe("ChatX Watcher run state machine", () => {
     startRun(state, baseMetadata, 1000, "run-1");
     completeRun(state, "run-1");
 
-    const ack = acknowledgeRun(state, "conversation-a", 8000);
+    const ack = acknowledgeRun(state, "run-1", 8000);
     expect(ack.acknowledged).toBe(true);
     expect(ack.run?.state).toBe(RunState.ACKNOWLEDGED);
 
     reduceIgnoredUiEvent(state);
     expect(state.runs[0].state).toBe(RunState.ACKNOWLEDGED);
-    expect(acknowledgeRun(state, "conversation-a", 9000).acknowledged).toBe(false);
+    expect(acknowledgeRun(state, "run-1", 9000).acknowledged).toBe(false);
   });
 
   it("CASE 5: a genuine new generation creates a new run and can request a new overlay", () => {
     const state = createEmptyWatcherState();
     startRun(state, baseMetadata, 1000, "run-1");
     completeRun(state, "run-1");
-    acknowledgeRun(state, "conversation-a", 8000);
+    acknowledgeRun(state, "run-1", 8000);
 
     const next = startRun(state, baseMetadata, 9000, "run-2");
     expect(next.started).toBe(true);
     expect(next.run.runId).toBe("run-2");
 
-    const completed = completeRun(state, "run-2", 9000);
-    expect(completed.shouldPresent).toBe(true);
+    completeRun(state, "run-2", 9000);
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-2"]);
     expect(state.runs).toHaveLength(2);
   });
 
-  it("marks a DONE run presented only after an overlay is actually shown", () => {
+  it("keeps DONE pending until that exact completion is acknowledged", () => {
     const state = createEmptyWatcherState();
     startRun(state, baseMetadata, 1000, "run-1");
-    const completed = completeRun(state, "run-1");
+    completeRun(state, "run-1");
 
-    expect(completed.shouldPresent).toBe(true);
-    expect(completed.run?.presentedAt).toBeNull();
-    expect(getUnpresentedDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
+    expect(acknowledgeRun(state, "missing-run", 8000).acknowledged).toBe(false);
+    expect(getPendingDoneRuns(state).map((run) => run.runId)).toEqual(["run-1"]);
 
-    const firstMark = markRunPresented(state, "run-1", 8000);
-    expect(firstMark?.presentedAt).toBe(8000);
-    expect(getUnpresentedDoneRuns(state)).toHaveLength(0);
-    expect(markRunPresented(state, "run-1", 9000)).toBeNull();
+    expect(acknowledgeRun(state, "run-1", 9000).acknowledged).toBe(true);
+    expect(getPendingDoneRuns(state)).toHaveLength(0);
   });
 
   it("orders multiple pending completions deterministically without acknowledging on presentation", () => {
@@ -171,9 +167,9 @@ describe("ChatX Watcher run state machine", () => {
     completeRun(state, "run-1");
     startRun(state, baseMetadata, 9000, "run-2");
 
-    const ack = acknowledgeRun(state, "conversation-a", 10000);
+    const ack = acknowledgeRun(state, "run-1", 10000);
     expect(ack.acknowledged).toBe(true);
-    expect(ack.runIds).toEqual(["run-1"]);
+    expect(ack.run?.runId).toBe("run-1");
     expect(state.runs.find((run) => run.runId === "run-1")?.state).toBe(
       RunState.ACKNOWLEDGED
     );

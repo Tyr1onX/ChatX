@@ -75,9 +75,11 @@ describe("ChatX Watcher extension constraints", () => {
     expect(background).toContain("{ active: true, windowId: windowInfo.id }");
     expect(background).toContain('tab.url.startsWith("http://")');
     expect(background).toContain('tab.url.startsWith("https://")');
-    expect(background).toContain("getUnpresentedDoneRuns(state)[0]");
-    expect(background).toContain("markRunPresented");
+    expect(background).toContain("getPendingDoneRuns(state)[0]");
+    expect(background).not.toContain("markRunPresented");
+    expect(background).not.toContain("getUnpresentedDoneRuns");
     expect(background).toContain("chrome.tabs.onActivated.addListener");
+    expect(background).toMatch(/await tryPresentPendingCompletion\(\);\s+await requestAckCheck\(tabId\);/);
     expect(background).toContain("chrome.windows.onFocusChanged.addListener");
   });
 
@@ -86,10 +88,15 @@ describe("ChatX Watcher extension constraints", () => {
     const overlay = read("src/watcher/overlay.js");
 
     expect(overlay).toContain('close.addEventListener("click", () => removeOverlay(runId))');
+    expect(overlay).toContain('document.addEventListener("visibilitychange"');
+    expect(overlay).toContain('window.addEventListener("blur"');
+    expect(overlay).toContain('window.addEventListener("focus"');
+    expect(overlay).toContain('type: "PRESENT_PENDING_COMPLETION"');
+    expect(background).toContain('case "PRESENT_PENDING_COMPLETION"');
     expect(overlay).not.toContain("ACK_ELIGIBLE");
     expect(overlay).toContain('chrome.runtime.sendMessage({ type: "OPEN_COMPLETION", runId })');
     expect(background).toContain("await focusConversation(run)");
-    expect(background).toContain("await acknowledgeConversation(run.conversationId)");
+    expect(background).toContain("await acknowledgeCompletion(run.runId)");
     expect(background).toContain("await hideOverlay(sender.tab?.id, run.runId)");
   });
 
@@ -98,7 +105,8 @@ describe("ChatX Watcher extension constraints", () => {
     const overlay = read("src/watcher/overlay.js");
 
     expect(overlay).toContain('const HOST_ID = "chatx-completion-overlay"');
-    expect(overlay).toContain("removeOverlay();");
+    expect(overlay).toContain("const current = document.getElementById(HOST_ID)");
+    expect(overlay).toContain("return { shown: occupiedRunId === runId, occupiedRunId }");
     expect(overlay).toContain('host.attachShadow({ mode: "open" })');
     expect(overlay).toContain("position:fixed");
     expect(overlay).toContain("right:22px");
