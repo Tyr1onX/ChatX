@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { startBridge, type Bridge } from "../src/bridge/server.js";
+
 import { AuthStore, DEFAULT_SCOPES, MAX_REGISTERED_OAUTH_CLIENTS, filterScopes } from "../src/auth/store.js";
 import { makeTmpDir, cleanup, write, isolateStateDir, pkceVerifierAndChallenge } from "./helpers.js";
 
@@ -10,6 +11,7 @@ let bridge: Bridge;
 let base: string;
 
 const REDIRECT_URI = "http://127.0.0.1:19999/callback";
+const EXPECTED_PENDING_AUTH_LIMIT = 128;
 
 beforeAll(async () => {
   isolateStateDir();
@@ -359,6 +361,51 @@ describe("invalid scope authorization", () => {
     const redirect = new URL(location!);
     expect(redirect.searchParams.get("error")).toBe("invalid_scope");
     expect(redirect.searchParams.get("state")).toBe("scope-state");
+  });
+});
+
+describe("pending authorization capacity", () => {
+  it("rejects at the hard limit and accepts new requests after expired entries are pruned", async () => {
+    const workspaceRoot = makeTmpDir("oauth-pending-ws");
+    const authDir = makeTmpDir("oauth-pending-auth");
+    const pendingBridge = await startBridge({
+      workspaceRoot,
+      port: 0,
+      persistRuntime: false,
+      authStoreFile: path.join(authDir, "store.json"),
+    });
+    const client = pendingBridge.authStore.registerClient({ clientName: "pending-test", redirectUris: [REDIRECT_URI] });
+    expect(client).not.toBeNull();
+    const { challenge } = pkceVerifierAndChallenge();
+    const authorizeUrl = new URL(`${pendingBridge.localBaseUrl()}/oauth/authorize`);
+    authorizeUrl.searchParams.set("client_id", client!.clientId);
+    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+    const now = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+
+    try {
+      for (let i = 0; i < EXPECTED_PENDING_AUTH_LIMIT; i += 1) {
+        expect((await fetch(authorizeUrl, { redirect: "manual" })).status).toBe(200);
+      }
+
+      const limited = await fetch(authorizeUrl, { redirect: "manual" });
+      expect(limited.status).toBe(429);
+      await expect(limited.json()).resolves.toEqual({
+        error: "authorization_limit_reached",
+        error_description: "Too many OAuth authorization requests are pending; try again later",
+      });
+
+      nowSpy.mockReturnValue(now + 10 * 60_000 + 1);
+      expect((await fetch(authorizeUrl, { redirect: "manual" })).status).toBe(200);
+    } finally {
+      nowSpy.mockRestore();
+      await pendingBridge.close();
+      cleanup(workspaceRoot);
+      cleanup(authDir);
+    }
   });
 });
 

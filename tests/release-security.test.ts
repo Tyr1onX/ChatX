@@ -40,5 +40,7 @@ describe("release security gate", () => {
     expect(pkg.scripts["release:check"]).toContain("git diff --check");
     const releaseWorkflow = fs.readFileSync(path.join(repo, ".github/workflows/release.yml"), "utf8");
     expect(releaseWorkflow).toContain("corepack pnpm release:check");
+    expect(releaseWorkflow).toMatch(/uses: actions\/checkout@v5\s+with:\s+persist-credentials: false/);
+    expect(releaseWorkflow.match(/GH_TOKEN: \$\{\{ github\.token \}\}/g)).toHaveLength(2);
   });
 });

@@ -14,6 +14,8 @@ export interface OAuthDeps {
   logger: Logger;
 }
 
+const MAX_PENDING_AUTH_REQUESTS = 128;
+
 interface PendingAuthRequest {
   id: string;
   clientId: string;
@@ -76,7 +78,7 @@ function pairingPage(opts: {
     "workspace.search": "Search this workspace",
     "git.read": "Read git status and diffs",
     "execution.read": "Read local execution summaries",
-    "workspace.write": "Write files in this workspace",
+    "workspace.write": "Write and patch files; create directories; move and delete files or directories",
     "process.run": "Run local processes for this workspace",
     "browser.control": "Control the dedicated local browser",
     "workspace.control": "Legacy broad local-control access (compatibility)",
@@ -242,6 +244,14 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
     const scopes = filterScopes(query.scope);
     if (query.scope?.trim() && scopes.length === 0) {
       fail("invalid_scope", "None of the requested scopes are supported");
+      return;
+    }
+    if (pendingRequests.size >= MAX_PENDING_AUTH_REQUESTS) {
+      setAuthSecurityHeaders(res);
+      res.status(429).json({
+        error: "authorization_limit_reached",
+        error_description: "Too many OAuth authorization requests are pending; try again later",
+      });
       return;
     }
     const request: PendingAuthRequest = {

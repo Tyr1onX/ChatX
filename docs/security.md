@@ -20,7 +20,7 @@ New authorizations expose narrow scopes:
 | `workspace.search` | Workspace search |
 | `git.read` | Git status and diff |
 | `execution.read` | Local execution summaries |
-| `workspace.write` | `write_file` |
+| `workspace.write` | Write/patch files, create directories, and move/delete files or directories |
 | `process.run` | `run_command` |
 | `browser.control` | Dedicated-browser navigate/snapshot/click/type |
 | `offline_access` | Refresh-token flow |
