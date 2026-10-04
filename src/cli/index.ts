@@ -18,6 +18,7 @@ import { migrateWorkspaceDirectory } from "../workspace/migration.js";
 import { AuthStore } from "../auth/store.js";
 import { appendExecutionRecord } from "../execution/records.js";
 import { detectTunnelBinaries } from "../tunnel/detect.js";
+import { cloudflareTunnelDnsProblem } from "../tunnel/readiness.js";
 import {
   chooseQuickTunnel,
   hasCloudflaredCert,
@@ -149,7 +150,7 @@ interface AdminInfo {
   workspaceRoot: string;
   port: number;
   publicUrl: string | null;
-  tunnel: { running: boolean; url: string | null; provider: string };
+  tunnel: { running: boolean; url: string | null; provider: string; ready?: boolean; detail?: string };
   tokenCount: number;
   pairingActive: boolean;
   pid: number;
@@ -364,8 +365,15 @@ program
     say("");
     check(`Workspace：${info.workspaceName}`);
     check(`Bridge：运行中（端口 ${info.port}）`);
-    if (info.tunnel.running && info.tunnel.url) check(`安全连接：${info.tunnel.url}/mcp`);
-    else say("· 安全连接：未启用（本地模式）");
+    const tunnelReady = info.tunnel.ready ?? Boolean(info.publicUrl);
+    if (tunnelReady && info.publicUrl) {
+      check(`安全连接：${info.publicUrl}/mcp`);
+    } else if (info.tunnel.running || info.tunnel.detail) {
+      const dnsProblem = await cloudflareTunnelDnsProblem();
+      cross(`安全连接：不可用（${dnsProblem ?? info.tunnel.detail ?? "公网 /health 检查失败"}）`);
+    } else {
+      say("· 安全连接：未启用（本地模式）");
+    }
     say(`· 已授权连接：${info.tokenCount > 0 ? "是" : "否"}`);
   });
 
@@ -514,8 +522,10 @@ program
       if (currentUrl) {
         healthy = Boolean(await probeBridgeHealth(currentUrl, info.workspaceId, 8000));
       }
+      const tunnelDnsProblem = !healthy && expectedPublic ? await cloudflareTunnelDnsProblem() : null;
+      if (tunnelDnsProblem) report.tunnel = { ok: false, detail: tunnelDnsProblem };
 
-      if ((!currentUrl || !healthy) && opts.fix && (expectedPublic || info.tunnel.running)) {
+      if ((!currentUrl || !healthy) && opts.fix && !tunnelDnsProblem && (expectedPublic || info.tunnel.running)) {
         try {
           const binaries = detectTunnelBinaries();
           if (!binaries.cloudflared) {
@@ -617,7 +627,10 @@ program
         report.tunnel = { ok: false, detail: "公网地址无法访问" };
       }
     } else if (namedReady) {
-      report.tunnel = { ok: false, detail: "NAMED_TUNNEL_DOWN" };
+      report.tunnel = {
+        ok: false,
+        detail: (await cloudflareTunnelDnsProblem()) ?? "NAMED_TUNNEL_DOWN",
+      };
       namedRepair = { needed: true, userMessage: NAMED_REPAIR_MESSAGE };
     } else if (lastEndpoint?.publicUrl) {
       report.tunnel = { ok: false, detail: "安全连接未运行" };

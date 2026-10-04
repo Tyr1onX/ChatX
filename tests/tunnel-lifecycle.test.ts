@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   findBinary: vi.fn(() => "cloudflared-test"),
+  probeBridgeHealth: vi.fn(async () => ({})),
+  tunnelDnsProblem: vi.fn(async () => null),
 }));
 
 vi.mock("node:child_process", async () => {
@@ -17,6 +19,15 @@ vi.mock("../src/tunnel/detect.js", () => ({
   findBinary: mocks.findBinary,
   detectTunnelBinaries: () => ({ cloudflared: mocks.findBinary("cloudflared") }),
 }));
+
+vi.mock("../src/tunnel/readiness.js", () => ({
+  cloudflareTunnelDnsProblem: mocks.tunnelDnsProblem,
+}));
+
+vi.mock("../src/bridge/runtime.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/bridge/runtime.js")>("../src/bridge/runtime.js");
+  return { ...actual, probeBridgeHealth: mocks.probeBridgeHealth };
+});
 
 import { startBridge, type Bridge } from "../src/bridge/server.js";
 import { writeTunnelState } from "../src/tunnel/state.js";
@@ -63,6 +74,8 @@ async function adminInfo(bridge: Bridge): Promise<{ publicUrl: string | null }> 
 afterEach(() => {
   mocks.spawn.mockReset();
   mocks.findBinary.mockClear();
+  mocks.probeBridgeHealth.mockClear();
+  mocks.tunnelDnsProblem.mockClear();
   while (cleanupDirs.length) cleanup(cleanupDirs.pop()!);
   if (previousStateDir === undefined) delete process.env.C2C_STATE_DIR;
   else process.env.C2C_STATE_DIR = previousStateDir;

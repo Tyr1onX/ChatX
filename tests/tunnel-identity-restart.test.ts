@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   findBinary: vi.fn(() => "cloudflared-test"),
+  probeBridgeHealth: vi.fn(async () => ({})),
+  tunnelDnsProblem: vi.fn(async () => null),
 }));
 
 vi.mock("node:child_process", async () => {
@@ -17,6 +19,15 @@ vi.mock("../src/tunnel/detect.js", () => ({
   findBinary: mocks.findBinary,
   detectTunnelBinaries: () => ({ cloudflared: mocks.findBinary("cloudflared") }),
 }));
+
+vi.mock("../src/tunnel/readiness.js", () => ({
+  cloudflareTunnelDnsProblem: mocks.tunnelDnsProblem,
+}));
+
+vi.mock("../src/bridge/runtime.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/bridge/runtime.js")>("../src/bridge/runtime.js");
+  return { ...actual, probeBridgeHealth: mocks.probeBridgeHealth };
+});
 
 import { startBridge, type Bridge } from "../src/bridge/server.js";
 import { cleanup, isolateStateDir, makeGitRepo, makeTmpDir } from "./helpers.js";
@@ -43,6 +54,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   mocks.spawn.mockReset();
   mocks.findBinary.mockClear();
+  mocks.probeBridgeHealth.mockClear();
+  mocks.tunnelDnsProblem.mockClear();
   while (bridges.length) await bridges.pop()!.close();
   while (cleanupDirs.length) cleanup(cleanupDirs.pop()!);
   if (previousStateDir === undefined) delete process.env.C2C_STATE_DIR;
@@ -79,22 +92,8 @@ it("restarts a running quick tunnel whose public health belongs to another works
     url: "https://first-demo.trycloudflare.com",
   });
 
-  const actualFetch = globalThis.fetch;
-  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url === "https://first-demo.trycloudflare.com/health") {
-      return new Response(
-        JSON.stringify({
-          service: "chatx-bridge",
-          version: "test",
-          workspaceId: "different-workspace",
-          status: "ok",
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
-    }
-    return actualFetch(input, init);
-  });
+  // probeBridgeHealth returns null when the public endpoint belongs to another workspace.
+  mocks.probeBridgeHealth.mockResolvedValueOnce(null).mockResolvedValueOnce({});
 
   const secondStart = fetch(`${bridge.localBaseUrl()}/admin/tunnel/start`, {
     method: "POST",
@@ -109,9 +108,11 @@ it("restarts a running quick tunnel whose public health belongs to another works
 
   expect(first.kill).toHaveBeenCalledWith("SIGTERM");
   expect(mocks.spawn).toHaveBeenCalledTimes(2);
-  expect(fetchSpy).toHaveBeenCalledWith(
-    "https://first-demo.trycloudflare.com/health",
-    expect.objectContaining({ signal: expect.any(AbortSignal) })
+  expect(mocks.probeBridgeHealth).toHaveBeenCalledWith(
+    "https://first-demo.trycloudflare.com",
+    bridge.workspace.id,
+    8000,
+    expect.any(String)
   );
 
   first.emit("exit", 0);

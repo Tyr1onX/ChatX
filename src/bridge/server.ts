@@ -12,6 +12,7 @@ import { CloudflaredQuickTunnel } from "../tunnel/cloudflared.js";
 import { CloudflaredNamedTunnel } from "../tunnel/cloudflared-named.js";
 import type { TunnelProvider } from "../tunnel/provider.js";
 import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
+import { cloudflareTunnelDnsProblem } from "../tunnel/readiness.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
 import { connectorAction, mcpUrlFromPublic, readLastEndpoint } from "../config/endpoint.js";
@@ -23,6 +24,8 @@ import { ProcessSessionManager } from "../process/session-manager.js";
 const TUNNEL_RETRY_MIN_MS = 1_000;
 const TUNNEL_RETRY_MAX_MS = 30_000;
 const TUNNEL_HEALTH_MS = 1_000;
+const TUNNEL_READY_CHECK_MS = 10_000;
+const PUBLIC_HEALTH_TIMEOUT_MS = 3_000;
 
 function tunnelForWorkspace(workspaceId: string, logger: Logger): TunnelProvider {
   const binding = namedTunnelBinding(readTunnelState(workspaceId));
@@ -101,6 +104,8 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   let tunnelSupervisorTimer: NodeJS.Timeout | null = null;
   let tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
   let tunnelWanted = restoreTunnel;
+  let tunnelReadinessError: string | null = null;
+  let lastTunnelReadyCheckAt = 0;
   let closed = false;
 
   const app = express();
@@ -123,28 +128,67 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     logger.info(`Revoked stale connector authorization after public endpoint changed (${count})`);
   };
 
+  const refreshTunnelReadiness = async (timeoutMs = PUBLIC_HEALTH_TIMEOUT_MS): Promise<boolean> => {
+    const status = tunnel.status();
+    if (!status.running || !status.url) {
+      if (!tunnelWanted) tunnelReadinessError = null;
+      else if (status.detail) tunnelReadinessError = status.detail;
+      if (publicBaseUrl) {
+        publicBaseUrl = null;
+        persistRuntime();
+      }
+      return false;
+    }
+
+    lastTunnelReadyCheckAt = Date.now();
+    const health = await probeBridgeHealth(status.url, workspace.id, timeoutMs, instanceId);
+    if (!health) {
+      tunnelReadinessError = "Tunnel process is connected, but the public /health check is unavailable.";
+      if (publicBaseUrl) {
+        publicBaseUrl = null;
+        persistRuntime();
+      }
+      return false;
+    }
+
+    tunnelReadinessError = null;
+    if (publicBaseUrl !== status.url) {
+      revokeStaleAuthorizationFor(status.url);
+      publicBaseUrl = status.url;
+      persistRuntime();
+    }
+    return true;
+  };
+
+  const checkTunnelDns = async (): Promise<void> => {
+    const problem = await cloudflareTunnelDnsProblem();
+    if (problem) {
+      tunnelReadinessError = problem;
+      throw new Error(problem);
+    }
+    tunnelReadinessError = null;
+  };
+
   const startTunnel = (): Promise<string> => {
     if (tunnelStartPromise) return tunnelStartPromise;
     tunnelStartPromise = (async () => {
+      await checkTunnelDns();
       const status = tunnel.status();
       if (status.running && status.url) {
-        const health = await probeBridgeHealth(status.url, workspace.id, 8000, instanceId);
-        if (health) {
-          revokeStaleAuthorizationFor(status.url);
-          publicBaseUrl = status.url;
-          persistRuntime();
-          return status.url;
-        }
+        if (await refreshTunnelReadiness(8000)) return status.url;
         await tunnel.stop();
         publicBaseUrl = null;
         persistRuntime();
       }
+
       const url = await tunnel.start(port);
       if (!closed) {
-        revokeStaleAuthorizationFor(url);
-        publicBaseUrl = url;
         tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
-        persistRuntime();
+        if (!(await refreshTunnelReadiness(8000))) {
+          throw new Error(
+            tunnelReadinessError ?? "Tunnel connected, but the public /health check is unavailable."
+          );
+        }
       }
       return url;
     })().finally(() => {
@@ -170,11 +214,17 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
   const superviseTunnel = async (): Promise<void> => {
     if (closed || !tunnelWanted) return;
-    if (tunnel.status().running) {
+    const status = tunnel.status();
+    if (status.running && status.url) {
+      if (Date.now() - lastTunnelReadyCheckAt >= TUNNEL_READY_CHECK_MS) {
+        await refreshTunnelReadiness();
+      }
       tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
       scheduleTunnelSupervisor(TUNNEL_HEALTH_MS);
       return;
     }
+
+    await refreshTunnelReadiness();
     try {
       await startTunnel();
       tunnelRetryDelayMs = TUNNEL_RETRY_MIN_MS;
@@ -239,12 +289,9 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     res.json({ code: session.code, expiresAt: session.expiresAt });
   });
 
-  app.get("/admin/info", adminGuard, (_req, res) => {
+  app.get("/admin/info", adminGuard, async (_req, res) => {
+    await refreshTunnelReadiness();
     const tunnelStatus = tunnel.status();
-    if (!tunnelStatus.running && publicBaseUrl) {
-      publicBaseUrl = null;
-      persistRuntime();
-    }
     res.json({
       service: SERVICE_NAME,
       version: VERSION,
@@ -254,7 +301,11 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       workspaceRoot: workspace.root,
       port,
       publicUrl: publicBaseUrl,
-      tunnel: tunnelStatus,
+      tunnel: {
+        ...tunnelStatus,
+        ready: Boolean(publicBaseUrl),
+        detail: tunnelReadinessError ?? tunnelStatus.detail,
+      },
       tokenCount: authStore.tokenCount(),
       pairingActive: pairing.hasActiveSession(),
       pid: process.pid,
@@ -281,6 +332,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     clearTunnelSupervisor();
     void tunnel.stop().then(() => {
       publicBaseUrl = null;
+      tunnelReadinessError = null;
       persistRuntime();
       res.json({ stopped: true });
     });
