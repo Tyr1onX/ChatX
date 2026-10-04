@@ -398,3 +398,5 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     tunnel,
     localBaseUrl: () => `http://${host}:${port}`,
     close: shutdown,
+  };
+}
