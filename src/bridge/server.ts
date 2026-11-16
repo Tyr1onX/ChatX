@@ -15,9 +15,8 @@ import { namedTunnelBinding, readTunnelState } from "../tunnel/state.js";
 import { cloudflareTunnelDnsProblem } from "../tunnel/readiness.js";
 import { Logger, nullLogger } from "../logger/index.js";
 import { DEFAULT_HOST, DEFAULT_PORT } from "../config/paths.js";
-import { connectorAction, mcpUrlFromPublic, readLastEndpoint } from "../config/endpoint.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
-import { writeRuntimeState, clearRuntimeState, probeBridgeHealth, type RuntimeState } from "./runtime.js";
+import { findLiveBridge, acquireBridgeLock, writeRuntimeState, clearRuntimeState, probeBridgeHealth, type RuntimeState } from "./runtime.js";
 import { BrowserController } from "../browser/controller.js";
 import { ProcessSessionManager } from "../process/session-manager.js";
 
@@ -83,6 +82,20 @@ function listen(app: express.Express, host: string, preferredPort: number): Prom
 }
 
 export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
+  const workspace = new Workspace(opts.workspaceRoot);
+  const release = opts.persistRuntime === false ? async () => {} : await acquireBridgeLock(workspace.id);
+  try {
+    if (opts.persistRuntime !== false && await findLiveBridge(workspace.id)) {
+      throw new Error("Workspace bridge is already running");
+    }
+    return await startBridgeWithLock(opts, release);
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+async function startBridgeWithLock(opts: BridgeOptions, releaseLock: () => Promise<void>): Promise<Bridge> {
   const logger = opts.logger ?? nullLogger;
   const workspace = new Workspace(opts.workspaceRoot);
   const host = opts.host ?? DEFAULT_HOST;
@@ -119,15 +132,6 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     return `${proto}://${hostHeader}`;
   };
 
-  const revokeStaleAuthorizationFor = (url: string): void => {
-    const previousMcpUrl = readLastEndpoint(workspace.id)?.mcpUrl;
-    const nextMcpUrl = mcpUrlFromPublic(url);
-    if (authStore.tokenCount() <= 0 || connectorAction(previousMcpUrl, nextMcpUrl) !== "update") return;
-    const count = authStore.revokeAll();
-    pairing.invalidateAll();
-    logger.info(`Revoked stale connector authorization after public endpoint changed (${count})`);
-  };
-
   const refreshTunnelReadiness = async (timeoutMs = PUBLIC_HEALTH_TIMEOUT_MS): Promise<boolean> => {
     const status = tunnel.status();
     if (!status.running || !status.url) {
@@ -153,7 +157,6 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
 
     tunnelReadinessError = null;
     if (publicBaseUrl !== status.url) {
-      revokeStaleAuthorizationFor(status.url);
       publicBaseUrl = status.url;
       persistRuntime();
     }
@@ -357,7 +360,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
   logger.info(`Bridge listening on ${host}:${port} for workspace ${workspace.name} (${workspace.id})`);
 
   const persistRuntime = (): void => {
-    if (opts.persistRuntime === false) return;
+    if (closed || opts.persistRuntime === false) return;
     const state: RuntimeState = {
       service: SERVICE_NAME,
       version: VERSION,
@@ -384,7 +387,8 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
     await processes.closeAll();
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (opts.persistRuntime !== false) clearRuntimeState(workspace.id);
+    if (opts.persistRuntime !== false) clearRuntimeState(workspace.id, instanceId);
+    await releaseLock();
     logger.info("Bridge stopped");
   };
 

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureDir, getStateDir } from "../config/paths.js";
-import { findLiveBridge, probeBridge, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
+import { findLiveBridge, probeBridgeHealth, readRuntimeState, type RuntimeState } from "../bridge/runtime.js";
 import { Workspace } from "../workspace/manager.js";
 import {
   consumeTunnelRestoreIntent,
@@ -78,6 +78,8 @@ export async function ensureBridge(workspaceRoot: string, opts: { port?: number 
       return { runtime, spawned: true };
     }
     if (child.exitCode !== null && child.exitCode !== 0) {
+      const winner = await findLiveBridge(workspace.id);
+      if (winner) return { runtime: winner, spawned: false };
       throw new Error(`Bridge process exited with code ${child.exitCode}. See ${logFile}`);
     }
   }
@@ -113,7 +115,7 @@ export async function stopBridge(workspaceRoot: string): Promise<boolean> {
   forgetRestartConnection(workspace.id);
   const runtime = readRuntimeState(workspace.id);
   if (!runtime) return false;
-  const healthy = await probeBridge(runtime.port);
+  const healthy = await probeBridgeHealth(`http://127.0.0.1:${runtime.port}`, workspace.id, 2000, runtime.instanceId);
   if (healthy && healthy.workspaceId === workspace.id) {
     try {
       const info = await adminFetch<RestartConnectionInfo>(runtime, "GET", "/admin/info", 5000);
@@ -123,16 +125,18 @@ export async function stopBridge(workspaceRoot: string): Promise<boolean> {
     }
     try {
       await adminFetch(runtime, "POST", "/admin/shutdown", 5000);
-      return true;
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const state = readRuntimeState(workspace.id);
+        if (!state || state.instanceId !== runtime.instanceId) return true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("Bridge shutdown did not complete within 15s");
     } catch {
-      // fall through to kill
+      // Never signal a PID from unverified or stale runtime state.
+      throw new Error("Bridge shutdown failed; inspect its log before retrying");
     }
   }
-  try {
-    process.kill(runtime.pid, "SIGTERM");
-    return true;
-  } catch {
-    forgetRestartConnection(workspace.id);
-    return false;
-  }
+  forgetRestartConnection(workspace.id);
+  return false;
 }

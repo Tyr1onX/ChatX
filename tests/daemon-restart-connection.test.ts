@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   findLiveBridge: vi.fn(),
-  probeBridge: vi.fn(),
+  probeBridgeHealth: vi.fn(),
   readRuntimeState: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock("node:child_process", async () => {
 
 vi.mock("../src/bridge/runtime.js", () => ({
   findLiveBridge: mocks.findLiveBridge,
-  probeBridge: mocks.probeBridge,
+  probeBridgeHealth: mocks.probeBridgeHealth,
   readRuntimeState: mocks.readRuntimeState,
 }));
 
@@ -29,7 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   mocks.spawn.mockReset();
   mocks.findLiveBridge.mockReset();
-  mocks.probeBridge.mockReset();
+  mocks.probeBridgeHealth.mockReset();
   mocks.readRuntimeState.mockReset();
   while (cleanupDirs.length) cleanup(cleanupDirs.pop()!);
   if (previousStateDir === undefined) delete process.env.C2C_STATE_DIR;
@@ -62,8 +62,8 @@ describe("bridge restart connection preservation", () => {
       publicUrl: null,
     };
 
-    mocks.readRuntimeState.mockReturnValue(oldRuntime);
-    mocks.probeBridge.mockResolvedValue({
+    mocks.readRuntimeState.mockReturnValueOnce(oldRuntime).mockReturnValue(null);
+    mocks.probeBridgeHealth.mockResolvedValue({
       service: "ChatX",
       version: "test",
       workspaceId: workspace.id,
