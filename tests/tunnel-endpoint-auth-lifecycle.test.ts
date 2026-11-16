@@ -103,7 +103,7 @@ afterEach(async () => {
   else process.env.C2C_STATE_DIR = previousStateDir;
 });
 
-it("revokes old authorization before publishing a changed public endpoint", async () => {
+it("preserves workspace authorization when publishing a changed public endpoint", async () => {
   const bridge = await makeBridge("endpoint-auth-change");
   bridge.authStore.issueTokens({
     clientId: "old-chatgpt-connector",
@@ -128,11 +128,10 @@ it("revokes old authorization before publishing a changed public endpoint", asyn
 
   expect(await adminInfo(bridge)).toEqual({ tokenCount: 2, pairingActive: true });
   await startQuickTunnel(bridge, fakeChild(), newPublicUrl);
-  expect(await adminInfo(bridge)).toEqual({ tokenCount: 0, pairingActive: false });
+  expect(await adminInfo(bridge)).toEqual({ tokenCount: 2, pairingActive: true });
 
-  // Simulate the CLI persisting the discovered endpoint and the later ChatGPT
-  // connector/OAuth replacement being interrupted. The next Doctor pass must
-  // still see a repairable authorization loss instead of treating it as done.
+  // Persisting a discovered endpoint must also preserve the existing grant.
+  // Doctor still identifies a genuinely missing grant as repairable.
   writeLastEndpoint({
     workspaceId: bridge.workspace.id,
     port: bridge.port,

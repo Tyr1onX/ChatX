@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import lockfile from "proper-lockfile";
 import path from "node:path";
 import { ensureDir, getStateDir, readJsonIfExists, writeSecureJson } from "../config/paths.js";
 import { SERVICE_NAME, VERSION } from "../version.js";
@@ -26,18 +27,44 @@ export function runtimeFile(workspaceId: string): string {
 }
 
 export function writeRuntimeState(state: RuntimeState): void {
-  writeSecureJson(runtimeFile(state.workspaceId), state);
+  const file = runtimeFile(state.workspaceId);
+  const temporary = `${file}.${process.pid}.${state.instanceId}.tmp`;
+  try {
+    writeSecureJson(temporary, state);
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }
 
 export function readRuntimeState(workspaceId: string): RuntimeState | null {
   return readJsonIfExists<RuntimeState>(runtimeFile(workspaceId));
 }
 
-export function clearRuntimeState(workspaceId: string): void {
+export function clearRuntimeState(workspaceId: string, instanceId: string): void {
+  if (readRuntimeState(workspaceId)?.instanceId !== instanceId) return;
   try {
     fs.rmSync(runtimeFile(workspaceId), { force: true });
   } catch {
     // ignore
+  }
+}
+
+/** One lifetime lock per persisted workspace, including foreground serve. */
+export async function acquireBridgeLock(workspaceId: string): Promise<() => Promise<void>> {
+  const file = runtimeFile(workspaceId);
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    try {
+      return await lockfile.lock(file, { realpath: false, stale: 10_000, update: 2000 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ELOCKED") throw error;
+      // Do not queue another server behind a live owner: it could otherwise
+      // unexpectedly start after a later stop command releases the lock.
+      if (await findLiveBridge(workspaceId)) throw new Error("Workspace bridge is already locked by a live instance");
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 }
 
@@ -101,7 +128,7 @@ export async function probeBridge(
 export async function findLiveBridge(workspaceId: string): Promise<RuntimeState | null> {
   const state = readRuntimeState(workspaceId);
   if (!state) return null;
-  const health = await probeBridge(state.port);
+  const health = await probeBridgeHealth(`http://127.0.0.1:${state.port}`, workspaceId, 2000, state.instanceId);
   if (health && health.workspaceId === workspaceId) return state;
   return null;
 }

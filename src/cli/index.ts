@@ -330,7 +330,6 @@ program
   .action(async (opts: { workspace?: string; tunnel: boolean }) => {
     const root = resolveWorkspace(opts.workspace);
     await stopBridge(root);
-    await new Promise((resolve) => setTimeout(resolve, 500));
     try {
       const { info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       check(`Bridge 已重启（${info.workspaceName}）`);
@@ -804,6 +803,7 @@ program
     const source = new Workspace(resolveWorkspace(opts.workspace));
     const previousEndpoint = readLastEndpoint(source.id);
     const previousTunnel = readTunnelState(source.id);
+    const previousRuntime = readRuntimeState(source.id);
     const live = await findLiveBridge(source.id);
 
     if (live) {
@@ -816,7 +816,7 @@ program
         throw new Error("Bridge is still running; workspace rename was not started.");
       }
     }
-    clearRuntimeState(source.id);
+    if (previousRuntime?.instanceId) clearRuntimeState(source.id, previousRuntime.instanceId);
 
     const relativeCwd = path.relative(source.root, process.cwd());
     if (relativeCwd === "" || (!relativeCwd.startsWith("..") && !path.isAbsolute(relativeCwd))) {
